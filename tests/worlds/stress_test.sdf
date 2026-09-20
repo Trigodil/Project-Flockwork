@@ -1,0 +1,116 @@
+<?xml version="1.0" ?>
+<!--
+  Stress test world. Empty of drones (spawned dynamically by
+  stress_test.launch.py), wind enabled, and static obstacles placed
+  between the start and destination zones. No obstacle avoidance exists
+  in consensus_controller_node yet, this world exists to show where that
+  logic currently breaks down, not to prove it works.
+-->
+<sdf version="1.6">
+  <world name="stress_test">
+    <physics name="4ms" type="ignored">
+      <max_step_size>0.004</max_step_size>
+      <real_time_factor>1.0</real_time_factor>
+    </physics>
+    <plugin filename="gz-sim-physics-system" name="gz::sim::systems::Physics"></plugin>
+    <plugin filename="gz-sim-scene-broadcaster-system" name="gz::sim::systems::SceneBroadcaster"></plugin>
+    <plugin filename="gz-sim-user-commands-system" name="gz::sim::systems::UserCommands"></plugin>
+    <plugin filename="gz-sim-sensors-system" name="gz::sim::systems::Sensors">
+      <render_engine>ogre2</render_engine>
+    </plugin>
+
+    <wind>
+      <linear_velocity>0 3 0</linear_velocity>
+    </wind>
+    <plugin filename="gz-sim-wind-effects-system" name="gz::sim::systems::WindEffects">
+      <force_approximation_scaling_factor>1</force_approximation_scaling_factor>
+      <horizontal>
+        <magnitude>
+          <time_for_rise>3</time_for_rise>
+          <sin>
+            <amplitude_percent>0.3</amplitude_percent>
+            <period>15</period>
+          </sin>
+          <noise type="gaussian">
+            <mean>0</mean>
+            <stddev>0.05</stddev>
+          </noise>
+        </magnitude>
+        <direction>
+          <time_for_rise>5</time_for_rise>
+          <sin>
+            <amplitude>10</amplitude>
+            <period>20</period>
+          </sin>
+        </direction>
+      </horizontal>
+    </plugin>
+
+    <light type="directional" name="sun">
+      <cast_shadows>true</cast_shadows>
+      <pose>0 0 10 0 0 0</pose>
+      <diffuse>0.8 0.8 0.8 1</diffuse>
+      <specular>0.2 0.2 0.2 1</specular>
+      <attenuation>
+        <range>1000</range>
+        <constant>0.9</constant>
+        <linear>0.01</linear>
+        <quadratic>0.001</quadratic>
+      </attenuation>
+      <direction>-0.5 0.1 -0.9</direction>
+    </light>
+
+    <model name="ground_plane">
+      <static>true</static>
+      <link name="link">
+        <collision name="collision">
+          <geometry><plane><normal>0 0 1</normal><size>100 100</size></plane></geometry>
+        </collision>
+        <visual name="visual">
+          <geometry><plane><normal>0 0 1</normal><size>100 100</size></plane></geometry>
+          <material>
+            <ambient>0.8 0.8 0.8 1</ambient>
+            <diffuse>0.8 0.8 0.8 1</diffuse>
+            <specular>0.8 0.8 0.8 1</specular>
+          </material>
+        </visual>
+      </link>
+    </model>
+
+    <!-- Obstacle gauntlet between the default start (x=-8) and destination
+         (x=8) zones. Static pillars at drone flight height. -->
+    <model name="obstacle_1">
+      <static>true</static>
+      <pose>-2 -1.5 2 0 0 0</pose>
+      <link name="link">
+        <collision name="collision"><geometry><cylinder><radius>0.4</radius><length>4</length></cylinder></geometry></collision>
+        <visual name="visual">
+          <geometry><cylinder><radius>0.4</radius><length>4</length></cylinder></geometry>
+          <material><ambient>0.8 0.2 0.2 1</ambient><diffuse>0.8 0.2 0.2 1</diffuse></material>
+        </visual>
+      </link>
+    </model>
+    <model name="obstacle_2">
+      <static>true</static>
+      <pose>0 1.5 2 0 0 0</pose>
+      <link name="link">
+        <collision name="collision"><geometry><cylinder><radius>0.4</radius><length>4</length></cylinder></geometry></collision>
+        <visual name="visual">
+          <geometry><cylinder><radius>0.4</radius><length>4</length></cylinder></geometry>
+          <material><ambient>0.8 0.2 0.2 1</ambient><diffuse>0.8 0.2 0.2 1</diffuse></material>
+        </visual>
+      </link>
+    </model>
+    <model name="obstacle_3">
+      <static>true</static>
+      <pose>2 -1 2 0 0 0</pose>
+      <link name="link">
+        <collision name="collision"><geometry><cylinder><radius>0.4</radius><length>4</length></cylinder></geometry></collision>
+        <visual name="visual">
+          <geometry><cylinder><radius>0.4</radius><length>4</length></cylinder></geometry>
+          <material><ambient>0.8 0.2 0.2 1</ambient><diffuse>0.8 0.2 0.2 1</diffuse></material>
+        </visual>
+      </link>
+    </model>
+  </world>
+</sdf>

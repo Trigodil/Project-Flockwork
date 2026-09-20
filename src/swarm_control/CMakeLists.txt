@@ -13,6 +13,7 @@ find_package(ament_cmake REQUIRED)
 find_package(rclcpp REQUIRED)
 find_package(geometry_msgs REQUIRED)
 find_package(nav_msgs REQUIRED)
+find_package(sensor_msgs REQUIRED)
 find_package(Eigen3 REQUIRED)
 
 include_directories(include)
@@ -43,6 +44,7 @@ ament_target_dependencies(consensus_controller_node
   rclcpp
   geometry_msgs
   nav_msgs
+  sensor_msgs
 )
 target_link_libraries(consensus_controller_node Eigen3::Eigen)
 

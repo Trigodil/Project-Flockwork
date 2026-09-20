@@ -32,6 +32,9 @@ public:
     domain_max_ = declare_parameter("domain_max", 6.0);
     grid_steps_ = declare_parameter("grid_steps", 40);
     update_period_sec_ = declare_parameter("update_period_sec", 0.5);
+    orbit_speed_ = declare_parameter("orbit_speed", 0.0);  // rad/s, 0 = static targets
+
+    start_time_ = now();
 
     const size_t n = drone_names_.size();
     positions_.assign(n, geometry_msgs::msg::Point());
@@ -61,13 +64,28 @@ private:
   double targetDensity(double x, double y) const
   {
     double density = 0.0;
-    for (size_t k = 0; k < target_x_.size(); ++k) {
-      const double dx = x - target_x_[k];
-      const double dy = y - target_y_[k];
+    for (size_t k = 0; k < rotated_x_.size(); ++k) {
+      const double dx = x - rotated_x_[k];
+      const double dy = y - rotated_y_[k];
       const double d2 = dx * dx + dy * dy;
       density += target_weight_[k] * std::exp(-d2 / (2.0 * target_sigma_ * target_sigma_));
     }
     return density;
+  }
+
+  // Rotates each target blob's base position around the domain center, so
+  // the swarm chases a moving formation instead of a static one when
+  // orbit_speed is nonzero.
+  void updateRotatedTargets()
+  {
+    const double angle = orbit_speed_ * (now() - start_time_).seconds();
+    const double c = std::cos(angle), s = std::sin(angle);
+    rotated_x_.resize(target_x_.size());
+    rotated_y_.resize(target_y_.size());
+    for (size_t k = 0; k < target_x_.size(); ++k) {
+      rotated_x_[k] = target_x_[k] * c - target_y_[k] * s;
+      rotated_y_[k] = target_x_[k] * s + target_y_[k] * c;
+    }
   }
 
   void update()
@@ -79,6 +97,7 @@ private:
       }
     }
 
+    updateRotatedTargets();
     std::vector<double> sum_x(n, 0.0), sum_y(n, 0.0), sum_w(n, 0.0);
 
     const double step = (domain_max_ - domain_min_) / grid_steps_;
@@ -124,10 +143,13 @@ private:
 
   std::vector<std::string> drone_names_;
   std::vector<double> target_x_, target_y_, target_weight_;
+  std::vector<double> rotated_x_, rotated_y_;
   double target_sigma_;
   double domain_min_, domain_max_;
   int grid_steps_;
   double update_period_sec_;
+  double orbit_speed_;
+  rclcpp::Time start_time_;
 
   std::vector<geometry_msgs::msg::Point> positions_;
   std::vector<bool> have_position_;
