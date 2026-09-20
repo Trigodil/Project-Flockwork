@@ -1,0 +1,48 @@
+Drone Swarm Control System Non-Military Public License, version 1.0
+Based on the MIT License, with a field-of-use restriction.
+
+Copyright (c) 2026 Ayush Sreejith
+
+Permission is hereby granted, free of charge, to any person obtaining a copy
+of this software and associated documentation files (the "Software"), to deal
+in the Software without restriction, including without limitation the rights
+to use, copy, modify, merge, publish, distribute, sublicense, and/or sell
+copies of the Software, and to permit persons to whom the Software is
+furnished to do so, subject to the following conditions:
+
+1. Attribution. The above copyright notice and this permission notice shall
+   be included in all copies or substantial portions of the Software.
+
+2. Non-military use only. The Software, and any derivative work based on
+   the Software, may NOT be used, in whole or in part, by:
+
+   (a) any national, state, or regional military, defense, or armed forces
+       organization, or any contractor acting on their behalf;
+   (b) any person or organization for the purpose of designing, developing,
+       testing, or operating weapons systems, weapons targeting systems, or
+       any system whose purpose is to cause physical harm or lethal force,
+       autonomously or otherwise;
+   (c) any person or organization for military surveillance, reconnaissance,
+       or intelligence-gathering purposes conducted by or on behalf of a
+       military or defense organization.
+
+3. Copyleft on the restriction. Any derivative work, fork, or redistribution
+   of the Software, in source or compiled form, must retain this Section 2
+   restriction unmodified. You may not relicense the Software or any
+   derivative work under terms that remove or weaken this restriction.
+
+4. No warranty. THE SOFTWARE IS PROVIDED "AS IS", WITHOUT WARRANTY OF ANY
+   KIND, EXPRESS OR IMPLIED, INCLUDING BUT NOT LIMITED TO THE WARRANTIES OF
+   MERCHANTABILITY, FITNESS FOR A PARTICULAR PURPOSE AND NONINFRINGEMENT. IN
+   NO EVENT SHALL THE AUTHORS OR COPYRIGHT HOLDERS BE LIABLE FOR ANY CLAIM,
+   DAMAGES OR OTHER LIABILITY, WHETHER IN AN ACTION OF CONTRACT, TORT OR
+   OTHERWISE, ARISING FROM, OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE
+   USE OR OTHER DEALINGS IN THE SOFTWARE.
+
+Note: this license imposes a field-of-use restriction and is therefore not
+an OSI-approved "open source" license under the Open Source Definition,
+even though the source code remains public and modifiable. It is a
+"source-available" license with an ethical-use restriction. This clause is
+a statement of intent and a legal deterrent; it has not been reviewed by a
+lawyer and its enforceability, especially across international
+jurisdictions and against state/military actors, is not guaranteed.

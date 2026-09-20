@@ -1,0 +1,15 @@
+{
+    "C_Cpp.default.compilerPath": "/usr/bin/g++",
+    "C_Cpp.default.cppStandard": "c++17",
+    "C_Cpp.default.intelliSenseMode": "linux-gcc-x64",
+    "cmake.configureOnOpen": false,
+    "files.associations": {
+        "*.sdf": "xml",
+        "*.world": "xml"
+    },
+    "files.exclude": {
+        "**/build": true,
+        "**/install": true,
+        "**/log": true
+    }
+}

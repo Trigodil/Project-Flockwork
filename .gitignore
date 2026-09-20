@@ -1,0 +1,32 @@
+# colcon workspace build artifacts
+build/
+install/
+log/
+
+# C++ build artifacts
+*.o
+*.obj
+*.exe
+*.out
+*.so
+*.a
+CMakeCache.txt
+CMakeFiles/
+cmake_install.cmake
+Makefile
+
+# Gazebo
+*.gzlog
+/tmp/
+
+# Editor
+.vscode/*
+!.vscode/settings.json
+!.vscode/c_cpp_properties.json
+!.vscode/tasks.json
+!.vscode/launch.json
+*.swp
+
+# OS
+.DS_Store
+Thumbs.db

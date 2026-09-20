@@ -1,0 +1,18 @@
+{
+    "configurations": [
+        {
+            "name": "WSL-ROS2-Jazzy",
+            "includePath": [
+                "${workspaceFolder}/src/**",
+                "/opt/ros/jazzy/include/**",
+                "/usr/include/gz/**"
+            ],
+            "defines": [],
+            "compilerPath": "/usr/bin/g++",
+            "cStandard": "c17",
+            "cppStandard": "c++17",
+            "intelliSenseMode": "linux-gcc-x64"
+        }
+    ],
+    "version": 4
+}
