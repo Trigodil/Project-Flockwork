@@ -5,7 +5,7 @@ An open-source decentralized drone swarm control system, built from the ground u
 
 # AI
 
-No AI was used in this project thoughout, so please do not open an issue or PR if the code is not checked or reviewed, an LLM genrating code for this project in itself is fine, but please ensure that it is reviewed.
+No AI was used in this project throughout, so please do not open an issue or PR if the code is not checked or reviewed, an LLM generating code for this project in itself is fine, but please ensure that it is reviewed.
 
 ## Status
 
