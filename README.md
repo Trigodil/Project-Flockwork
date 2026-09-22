@@ -44,7 +44,7 @@ Two sources feed `ObstacleAvoidance`, both just produce the same `Obstacle{posit
 ros2 launch tests/launch/stress_test.launch.py
 ```
 
-This is meant to surface where the current logic breaks down, not to prove it works. A known finding so far: a drone that collides with an obstacle (no avoidance exists yet) combined with sustained wind can drift far off the intended path with nothing pulling it back except the navigation term, a real gap that stage 4 (collision avoidance) is meant to close.
+This is meant to surface where the current logic breaks down. A known finding so far: a drone that collides with an obstacle (no avoidance exists yet) combined with sustained wind can drift far off the intended path with nothing pulling it back except the navigation term, a gap that stage 4 (collision avoidance) is meant to close.
 
 Drone-to-drone spacing now has a real safety floor: a barrier force (`min_safe_distance`, `barrier_gain`) grows sharply as any neighbor gets too close, an unbounded-but-capped tether (`tether_gain`) pulls a drone back once it strays past `desired_spacing` from its nearest neighbor even beyond `interaction_range`, and the final velocity command is rate-limited (`max_cmd_accel`) so it can't jump discontinuously between ticks. `min_safe_distance` defaults to 0.9m, above the X3 model's real ~0.71m rotor-to-rotor collision floor, going below that is a physical collision no control law can prevent. If you see runaway altitude or wild positions during testing, check for stale `ros2 launch` / `parameter_bridge` processes left over from a previous run first (`ps aux | grep gz`), two simulations publishing to the same topic names looks exactly like instability but isn't.
 
