@@ -24,7 +24,6 @@ from ament_index_python.packages import get_package_share_directory
 HOVER_HEIGHT = 2.0
 # Must match tests/worlds/stress_test.sdf's obstacle_1/2/3 poses.
 OBSTACLES = [(-2.0, -1.5, 0.4), (0.0, 1.5, 0.4), (2.0, -1.0, 0.4)]
-START_SPREAD = 1.2
 
 # Same X3 UAV base as swarm_control's template, plus a rigidly-joined
 # "wind_sail" link with enable_wind set. The drone's real body link lives
@@ -220,6 +219,9 @@ def launch_swarm(context, *args, **kwargs):
     }
 
     use_formation = LaunchConfiguration('use_formation').perform(context) == 'true'
+    start_spread_arg = LaunchConfiguration('start_spread').perform(context)
+    start_spread = (
+        float(start_spread_arg) if start_spread_arg else consensus_gains['desired_spacing'])
     slots = grid_slots(num_drones, consensus_gains['desired_spacing'])
 
     actions = []
@@ -228,9 +230,9 @@ def launch_swarm(context, *args, **kwargs):
 
     for i in range(num_drones):
         ns = f'x3_{i}'
-        # Tight cluster around the start point, not the wide stage-2 grid.
-        sx = start_x + (i % cols) * START_SPREAD
-        sy = start_y + (i // cols) * START_SPREAD
+        # Spawn in the same grid as the formation slots, outside the barrier band.
+        sx = start_x + (i % cols) * start_spread
+        sy = start_y + (i // cols) * start_spread
 
         actions.append(Node(
             package='ros_gz_sim',
@@ -320,6 +322,8 @@ def generate_launch_description():
         DeclareLaunchArgument('headless', default_value='false'),
         DeclareLaunchArgument('start_x', default_value='-8.0'),
         DeclareLaunchArgument('start_y', default_value='0.0'),
+        DeclareLaunchArgument('start_spread', default_value='',
+                               description='Spawn grid spacing, defaults to desired_spacing.'),
         DeclareLaunchArgument('destination_x', default_value='8.0'),
         DeclareLaunchArgument('destination_y', default_value='0.0'),
         DeclareLaunchArgument('use_path', default_value='false',
@@ -347,8 +351,8 @@ def generate_launch_description():
         DeclareLaunchArgument('max_cmd_accel', default_value='3.0'),
         DeclareLaunchArgument('idle_deadband', default_value='0.05'),
         DeclareLaunchArgument('arrival_radius', default_value='0.5'),
-        DeclareLaunchArgument('obstacle_detection_radius', default_value='2.0'),
-        DeclareLaunchArgument('obstacle_safety_margin', default_value='0.4'),
+        DeclareLaunchArgument('obstacle_detection_radius', default_value='3.0'),
+        DeclareLaunchArgument('obstacle_safety_margin', default_value='0.8'),
         DeclareLaunchArgument('obstacle_radial_gain', default_value='1.5'),
         DeclareLaunchArgument('obstacle_lateral_gain', default_value='2.0'),
         DeclareLaunchArgument('use_formation', default_value='true',

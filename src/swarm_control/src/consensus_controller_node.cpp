@@ -63,6 +63,14 @@ public:
     max_cmd_accel_ = declare_parameter("max_cmd_accel", 3.0);
     idle_deadband_ = declare_parameter("idle_deadband", 0.05);
     arrival_radius_ = declare_parameter("arrival_radius", 0.5);
+    yaw_hold_gain_ = declare_parameter("yaw_hold_gain", 1.0);
+    takeoff_fraction_ = declare_parameter("takeoff_fraction", 0.8);
+    neighbor_brake_decel_ = declare_parameter("neighbor_brake_decel", 1.5);
+    active_speed_threshold_ = declare_parameter("active_speed_threshold", 0.3);
+    min_active_drones_ = declare_parameter("min_active_drones", 2);
+    settle_gain_scale_ = declare_parameter("settle_gain_scale", 0.3);
+    // Below the plugin's maximumLinearAcceleration (2.0) so the braking is achievable.
+    obstacle_brake_decel_ = declare_parameter("obstacle_brake_decel", 1.5);
 
     if (desired_spacing_ <= min_safe_distance_) {
       RCLCPP_WARN(
@@ -87,8 +95,9 @@ public:
       obstacles_.push_back({Eigen::Vector2d(obstacle_x[i], obstacle_y[i]), obstacle_radius[i]});
     }
     obstacle_avoidance_.configure(
-      declare_parameter("obstacle_detection_radius", 2.0),
-      declare_parameter("obstacle_safety_margin", 0.4),
+      declare_parameter("obstacle_detection_radius", 3.0),
+      // Must exceed the X3 rotor reach (~0.36m) with room for tracking lag.
+      declare_parameter("obstacle_safety_margin", 0.8),
       declare_parameter("obstacle_radial_gain", 1.5),
       declare_parameter("obstacle_lateral_gain", 2.0));
 
@@ -243,6 +252,9 @@ private:
     }
 
     Eigen::Vector2d separation = Eigen::Vector2d::Zero();
+    Eigen::Vector2d emergency = Eigen::Vector2d::Zero();
+    std::vector<Eigen::Vector2d> neighbor_points;
+    int moving_drones = own_velocity.norm() > active_speed_threshold_ ? 1 : 0;
     Eigen::Vector2d sum_velocity = Eigen::Vector2d::Zero();
     Eigen::Vector2d sum_accel = Eigen::Vector2d::Zero();
     Eigen::Vector2d open_side = Eigen::Vector2d::Zero();
@@ -262,11 +274,9 @@ private:
       // Dead reckon through latency using the last broadcast velocity.
       const double dt_since = (current_time - nb.last_measurement_time).seconds();
       const Eigen::Vector2d predicted_position = nb.position + nb.velocity * dt_since;
-
-      if (use_formation_) {
-        formation_error +=
-          (predicted_position - neighbor_slots_[i]) - (own_position - own_slot_);
-        ++formation_count;
+      neighbor_points.push_back(predicted_position);
+      if (nb.velocity.norm() > active_speed_threshold_) {
+        ++moving_drones;
       }
 
       const Eigen::Vector2d offset = own_position - predicted_position;
@@ -281,7 +291,7 @@ private:
 
       // Summed over every neighbor, not just nearest, to avoid a discontinuous switch.
       if (dist <= min_safe_distance_) {
-        separation += FORCE_CAP * direction + barrier_tangential_gain_ * chosen_tangent;
+        emergency += FORCE_CAP * direction + barrier_tangential_gain_ * chosen_tangent;
         repelled = true;
       } else if (dist <= interaction_range_) {
         if (dist < spacing_inner) {
@@ -319,11 +329,19 @@ private:
       if (dist > interaction_range_) {
         continue;
       }
+      if (use_formation_) {
+        formation_error +=
+          (predicted_position - neighbor_slots_[i]) - (own_position - own_slot_);
+        ++formation_count;
+      }
       open_side += direction / dist;
       sum_velocity += nb.velocity;
       sum_accel += nb.accel;
       ++active_neighbors;
     }
+    // Settle mode: gentle corrections when the swarm is mostly still, avoids chain reactions.
+    const double settle_scale = moving_drones < min_active_drones_ ? settle_gain_scale_ : 1.0;
+    separation = settle_scale * separation + emergency;
     if (separation.norm() > FORCE_CAP) {
       separation = separation.normalized() * FORCE_CAP;
     }
@@ -360,7 +378,8 @@ private:
 
     const bool sidestepping = sidestep_.squaredNorm() > idle_deadband_ * idle_deadband_;
     const Eigen::Vector2d desired =
-      separation + alignment + accel_feedforward + navigation + sidestep_ + formation;
+      separation + alignment + accel_feedforward + navigation +
+      settle_scale * (sidestep_ + formation);
     const Eigen::Vector2d avoidance =
       obstacle_avoidance_.compute(
       own_position, own_velocity, navigation, open_side, active_obstacles);
@@ -371,6 +390,12 @@ private:
       dist_to_target < arrival_radius_ && !repelled && !sidestepping &&
       avoidance.squaredNorm() < 1e-12;
     if (arrived_and_clear || cmd.norm() < idle_deadband_) {
+      cmd = Eigen::Vector2d::Zero();
+    }
+    if (!airborne_ && msg->pose.pose.position.z >= takeoff_fraction_ * target_z_) {
+      airborne_ = true;
+    }
+    if (!airborne_) {
       cmd = Eigen::Vector2d::Zero();
     }
     const double speed = cmd.norm();
@@ -384,11 +409,30 @@ private:
     if (cmd_delta.norm() > max_delta) {
       cmd = last_cmd_ + cmd_delta.normalized() * max_delta;
     }
+    // After the rate limit so braking is never delayed. Repeated passes so
+    // clipping against one constraint can't push into another.
+    for (int pass = 0; pass < 3; ++pass) {
+      cmd = obstacle_avoidance_.limitApproach(
+        own_position, cmd, active_obstacles, obstacle_brake_decel_);
+      for (const auto & point : neighbor_points) {
+        const Eigen::Vector2d offset = own_position - point;
+        const double dist = offset.norm();
+        if (dist < 1e-6) {
+          continue;
+        }
+        cmd = swarm_control::ObstacleAvoidance::capInwardSpeed(
+          cmd, offset / dist, dist - min_safe_distance_, neighbor_brake_decel_);
+      }
+    }
     last_cmd_ = cmd;
 
+    // The velocity plugin takes body-frame commands.
+    const double cos_yaw = std::cos(own_yaw_);
+    const double sin_yaw = std::sin(own_yaw_);
     geometry_msgs::msg::Twist cmd_msg;
-    cmd_msg.linear.x = cmd.x();
-    cmd_msg.linear.y = cmd.y();
+    cmd_msg.linear.x = cos_yaw * cmd.x() + sin_yaw * cmd.y();
+    cmd_msg.linear.y = -sin_yaw * cmd.x() + cos_yaw * cmd.y();
+    cmd_msg.angular.z = -yaw_hold_gain_ * own_yaw_;
     cmd_msg.linear.z = std::clamp(
       pid_z_.update(target_z_, msg->pose.pose.position.z, dt),
       -max_horizontal_speed_, max_horizontal_speed_);
@@ -417,6 +461,14 @@ private:
   double max_cmd_accel_;
   double idle_deadband_;
   double arrival_radius_;
+  double yaw_hold_gain_;
+  double takeoff_fraction_;
+  double neighbor_brake_decel_;
+  double active_speed_threshold_;
+  int64_t min_active_drones_;
+  double settle_gain_scale_;
+  bool airborne_ = false;
+  double obstacle_brake_decel_;
   Eigen::Vector2d last_cmd_ = Eigen::Vector2d::Zero();
 
   double target_x_, target_y_, target_z_;

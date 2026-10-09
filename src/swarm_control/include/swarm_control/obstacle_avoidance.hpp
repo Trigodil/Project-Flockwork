@@ -61,10 +61,11 @@ public:
       }
 
       const double clearance = dist - obs.radius - safety_margin_;
-      if (clearance <= 0.0) {
-        const double surface_gap = std::max(dist - obs.radius, 1e-3);
-        const double magnitude = std::clamp(
-          radial_gain_ * FORCE_CAP * safety_margin_ / surface_gap, FORCE_CAP, EMERGENCY_CAP);
+      if (clearance < 0.0 && safety_margin_ > 0.0) {
+        // Zero at the margin edge, unbounded at the surface, so no kick on entry.
+        const double depth = std::min(-clearance / safety_margin_, 0.999);
+        const double magnitude =
+          std::min(radial_gain_ * safety_margin_ * depth / (1.0 - depth), EMERGENCY_CAP);
         avoidance -= magnitude * to_obstacle / dist;
       }
 
@@ -92,6 +93,45 @@ public:
     }
 
     return avoidance;
+  }
+
+  // Caps the speed into each obstacle so the drone can still stop before the margin,
+  // redirecting the removed speed along the surface so it slides around instead of stalling.
+  Eigen::Vector2d limitApproach(
+    const Eigen::Vector2d & position, Eigen::Vector2d cmd,
+    const std::vector<Obstacle> & obstacles, double max_decel) const
+  {
+    for (const auto & obs : obstacles) {
+      const Eigen::Vector2d offset = position - obs.position;
+      const double dist = offset.norm();
+      if (dist < 1e-6) {
+        continue;
+      }
+      const Eigen::Vector2d outward = offset / dist;
+      const double speed = cmd.norm();
+      cmd = capInwardSpeed(cmd, outward, dist - obs.radius - safety_margin_, max_decel);
+
+      const double normal = cmd.dot(outward);
+      const Eigen::Vector2d tangential = cmd - normal * outward;
+      if (tangential.norm() > 1e-3) {
+        const double tangential_speed =
+          std::sqrt(std::max(speed * speed - normal * normal, 0.0));
+        cmd = normal * outward + tangential.normalized() * tangential_speed;
+      }
+    }
+    return cmd;
+  }
+
+  // Removes only the inward excess, tangential motion is left untouched.
+  static Eigen::Vector2d capInwardSpeed(
+    Eigen::Vector2d cmd, const Eigen::Vector2d & outward, double clearance, double max_decel)
+  {
+    const double allowed_inward = std::sqrt(2.0 * max_decel * std::max(clearance, 0.0));
+    const double inward = -cmd.dot(outward);
+    if (inward > allowed_inward) {
+      cmd += (inward - allowed_inward) * outward;
+    }
+    return cmd;
   }
 
   double nearbyFactor(const Eigen::Vector2d & position, const std::vector<Obstacle> & obstacles) const
