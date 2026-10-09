@@ -6,6 +6,10 @@ An open-source decentralized drone swarm control system, built from the ground u
 
 *six drones take off, split around the pillars, and re-form their grid at the destination.*
 
+![Top-down view of the same stress test](docs/media/topdown.gif)
+
+*Top-down view of the same run.*
+
 ## References
 
 The control laws here are written from scratch, but the ideas behind them come from:
