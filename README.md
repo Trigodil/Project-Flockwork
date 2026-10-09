@@ -1,6 +1,6 @@
 # Flockwork
 
-An open-source decentralized drone swarm control system, built from the ground up in C++ on ROS 2 + Gazebo. This project implements the full control stack: a single-agent control through a multi-agent consensus, instead of leaning on a pre-built autopilot (PX4/ArduPilot), so that keeps the control theory visible which is my intent.
+An open-source decentralized drone swarm control system, built from the ground up in C++ on ROS 2 + Gazebo. This project implements the full control stack - a single-agent control through a multi-agent consensus, instead of leaning on a pre-built autopilot (PX4/ArduPilot), so that keeps the control theory visible which is my intent.
 
 ![Six drones holding a 3x2 formation while threading three pillars in the stress test](docs/media/stress_test.gif)
 
