@@ -161,9 +161,11 @@ DRONE_SDF_TEMPLATE = """<sdf version="1.6">
 
 
 CONSENSUS_GAIN_ARGS = [
-    'interaction_range', 'desired_spacing', 'min_safe_distance', 'barrier_gain', 'tether_gain',
+    'interaction_range', 'desired_spacing', 'min_safe_distance', 'barrier_gain',
+    'barrier_tangential_gain', 'tether_gain', 'tether_force_cap', 'free_zone_margin',
+    'collision_lookahead_time', 'sidestep_decay_time', 'sidestep_gain', 'arrival_radius',
     'alignment_gain', 'accel_feedforward_gain', 'navigation_gain',
-    'accel_filter_k', 'max_horizontal_speed', 'max_cmd_accel',
+    'accel_filter_k', 'max_horizontal_speed', 'max_cmd_accel', 'idle_deadband',
 ]
 
 
@@ -279,14 +281,22 @@ def generate_launch_description():
         DeclareLaunchArgument('interaction_range', default_value='2.5'),
         DeclareLaunchArgument('desired_spacing', default_value='1.5'),
         DeclareLaunchArgument('min_safe_distance', default_value='0.9'),
-        DeclareLaunchArgument('barrier_gain', default_value='2.0'),
+        DeclareLaunchArgument('barrier_gain', default_value='3.0'),
+        DeclareLaunchArgument('barrier_tangential_gain', default_value='3.0'),
         DeclareLaunchArgument('tether_gain', default_value='0.5'),
+        DeclareLaunchArgument('tether_force_cap', default_value='5.0'),
+        DeclareLaunchArgument('free_zone_margin', default_value='0.3'),
+        DeclareLaunchArgument('collision_lookahead_time', default_value='1.5'),
+        DeclareLaunchArgument('sidestep_decay_time', default_value='1.0'),
+        DeclareLaunchArgument('sidestep_gain', default_value='3.0'),
         DeclareLaunchArgument('alignment_gain', default_value='0.5'),
         DeclareLaunchArgument('accel_feedforward_gain', default_value='0.25'),
         DeclareLaunchArgument('navigation_gain', default_value='0.6'),
         DeclareLaunchArgument('accel_filter_k', default_value='0.2'),
         DeclareLaunchArgument('max_horizontal_speed', default_value='2.0'),
         DeclareLaunchArgument('max_cmd_accel', default_value='3.0'),
+        DeclareLaunchArgument('idle_deadband', default_value='0.05'),
+        DeclareLaunchArgument('arrival_radius', default_value='0.5'),
         DeclareLaunchArgument('orbit_speed', default_value='0.0',
                                description='Rotate mean-field targets around the center, rad/s.'),
         gz_sim,

@@ -1,6 +1,7 @@
 #pragma once
 
 #include <algorithm>
+#include <cmath>
 #include <vector>
 
 #include <Eigen/Dense>
@@ -14,7 +15,6 @@ struct Obstacle
   double radius;
 };
 
-// Pure function of (position, desired direction, obstacles), no neighbor state.
 class ObstacleAvoidance
 {
 public:
@@ -22,55 +22,99 @@ public:
 
   void configure(
     double detection_radius, double safety_margin,
-    double radial_gain, double tangential_gain)
+    double radial_gain, double lateral_gain, double min_closing_speed = 0.3)
   {
     detection_radius_ = detection_radius;
     safety_margin_ = safety_margin;
     radial_gain_ = radial_gain;
-    tangential_gain_ = tangential_gain;
+    lateral_gain_ = lateral_gain;
+    min_closing_speed_ = min_closing_speed;
   }
 
-  // desired_direction need not be normalized, only its sign matters.
+  // open_side points away from crowded neighbors, breaks ties on head-on approaches.
   Eigen::Vector2d compute(
     const Eigen::Vector2d & position,
-    const Eigen::Vector2d & desired_direction,
+    const Eigen::Vector2d & velocity,
+    const Eigen::Vector2d & travel_direction,
+    const Eigen::Vector2d & open_side,
     const std::vector<Obstacle> & obstacles) const
   {
     Eigen::Vector2d avoidance = Eigen::Vector2d::Zero();
+    constexpr double FORCE_CAP = 40.0;
+    constexpr double EMERGENCY_CAP = 100.0;
+    if (detection_radius_ <= 0.0) {
+      return avoidance;
+    }
+
+    const bool have_heading = travel_direction.squaredNorm() > 1e-6;
+    const Eigen::Vector2d forward =
+      have_heading ? Eigen::Vector2d(travel_direction.normalized()) : Eigen::Vector2d::Zero();
+    const Eigen::Vector2d left(-forward.y(), forward.x());
+    const double closing_speed = std::max(velocity.dot(forward), min_closing_speed_);
+    const double crowd_preference = std::clamp(open_side.dot(left), -1.0, 1.0);
 
     for (const auto & obs : obstacles) {
-      const Eigen::Vector2d offset = position - obs.position;
-      const double dist = offset.norm();
+      const Eigen::Vector2d to_obstacle = obs.position - position;
+      const double dist = to_obstacle.norm();
       if (dist < 1e-6) {
         continue;
       }
+
       const double clearance = dist - obs.radius - safety_margin_;
-      if (clearance >= detection_radius_) {
+      if (clearance <= 0.0) {
+        const double surface_gap = std::max(dist - obs.radius, 1e-3);
+        const double magnitude = std::clamp(
+          radial_gain_ * FORCE_CAP * safety_margin_ / surface_gap, FORCE_CAP, EMERGENCY_CAP);
+        avoidance -= magnitude * to_obstacle / dist;
+      }
+
+      if (!have_heading) {
+        continue;
+      }
+      const double along = to_obstacle.dot(forward);
+      const double lateral = to_obstacle.dot(left);
+      const double required = obs.radius + safety_margin_;
+      if (along <= 0.0 || along - required > detection_radius_ || std::abs(lateral) >= required) {
         continue;
       }
 
-      const Eigen::Vector2d radial = offset / dist;
-      const Eigen::Vector2d tangent(-radial.y(), radial.x());
-      const Eigen::Vector2d chosen_tangent =
-        tangent.dot(desired_direction) >= 0.0 ? tangent : -tangent;
-
-      const double proximity = std::clamp(1.0 - clearance / detection_radius_, 0.0, 1.0);
-      double radial_magnitude = radial_gain_ * proximity;
-      if (clearance <= 0.0) {
-        radial_magnitude = std::max(radial_magnitude, radial_gain_ * 5.0);
-      }
-
-      avoidance += radial_magnitude * radial + tangential_gain_ * proximity * chosen_tangent;
+      // Geometry decides once off-center, neighbors decide when nearly head-on.
+      const double side_score = -lateral + 0.25 * required * crowd_preference;
+      const double side = side_score >= 0.0 ? 1.0 : -1.0;
+      const double shift_needed = required + side * lateral;
+      const double time_to_reach = std::max(along, 0.2) / closing_speed;
+      const double lateral_speed =
+        std::clamp(lateral_gain_ * shift_needed / time_to_reach, 0.0, FORCE_CAP);
+      avoidance += lateral_speed * side * left;
+    }
+    if (avoidance.norm() > EMERGENCY_CAP) {
+      avoidance = avoidance.normalized() * EMERGENCY_CAP;
     }
 
     return avoidance;
+  }
+
+  double nearbyFactor(const Eigen::Vector2d & position, const std::vector<Obstacle> & obstacles) const
+  {
+    double max_proximity = 0.0;
+    if (detection_radius_ <= 0.0) {
+      return max_proximity;
+    }
+    for (const auto & obs : obstacles) {
+      const double clearance =
+        (position - obs.position).norm() - obs.radius - safety_margin_;
+      const double proximity = std::clamp(1.0 - clearance / detection_radius_, 0.0, 1.0);
+      max_proximity = std::max(max_proximity, proximity);
+    }
+    return max_proximity;
   }
 
 private:
   double detection_radius_ = 0.0;
   double safety_margin_ = 0.0;
   double radial_gain_ = 0.0;
-  double tangential_gain_ = 0.0;
+  double lateral_gain_ = 0.0;
+  double min_closing_speed_ = 0.3;
 };
 
 }  // namespace swarm_control

@@ -47,14 +47,38 @@ public:
     interaction_range_ = declare_parameter("interaction_range", 2.5);
     desired_spacing_ = declare_parameter("desired_spacing", 1.5);
     min_safe_distance_ = declare_parameter("min_safe_distance", 0.9);
-    barrier_gain_ = declare_parameter("barrier_gain", 2.0);
+    barrier_gain_ = declare_parameter("barrier_gain", 3.0);
+    barrier_tangential_gain_ = declare_parameter("barrier_tangential_gain", 3.0);
     tether_gain_ = declare_parameter("tether_gain", 0.5);
+    tether_force_cap_ = declare_parameter("tether_force_cap", 5.0);
+    free_zone_margin_ = declare_parameter("free_zone_margin", 0.3);
+    collision_lookahead_time_ = declare_parameter("collision_lookahead_time", 1.5);
+    sidestep_decay_time_ = declare_parameter("sidestep_decay_time", 1.0);
+    sidestep_gain_ = declare_parameter("sidestep_gain", 3.0);
     alignment_gain_ = declare_parameter("alignment_gain", 0.5);
     accel_feedforward_gain_ = declare_parameter("accel_feedforward_gain", 0.25);
     navigation_gain_ = declare_parameter("navigation_gain", 0.6);
     accel_filter_k_ = declare_parameter("accel_filter_k", 0.2);
     max_horizontal_speed_ = declare_parameter("max_horizontal_speed", 2.0);
     max_cmd_accel_ = declare_parameter("max_cmd_accel", 3.0);
+    idle_deadband_ = declare_parameter("idle_deadband", 0.05);
+    arrival_radius_ = declare_parameter("arrival_radius", 0.5);
+
+    if (desired_spacing_ <= min_safe_distance_) {
+      RCLCPP_WARN(
+        get_logger(),
+        "desired_spacing %.3f is not above min_safe_distance %.3f, raising it to %.3f",
+        desired_spacing_, min_safe_distance_, min_safe_distance_ + 0.1);
+      desired_spacing_ = min_safe_distance_ + 0.1;
+    }
+    const double max_free_zone = (desired_spacing_ - min_safe_distance_) * 0.5;
+    if (free_zone_margin_ > max_free_zone) {
+      RCLCPP_WARN(
+        get_logger(),
+        "free_zone_margin %.3f would collapse the barrier band, clamping to %.3f",
+        free_zone_margin_, max_free_zone);
+      free_zone_margin_ = max_free_zone;
+    }
 
     const auto obstacle_x = declare_parameter("obstacle_x", std::vector<double>{});
     const auto obstacle_y = declare_parameter("obstacle_y", std::vector<double>{});
@@ -66,7 +90,7 @@ public:
       declare_parameter("obstacle_detection_radius", 2.0),
       declare_parameter("obstacle_safety_margin", 0.4),
       declare_parameter("obstacle_radial_gain", 1.5),
-      declare_parameter("obstacle_tangential_gain", 1.0));
+      declare_parameter("obstacle_lateral_gain", 2.0));
 
     use_lidar_sensing_ = declare_parameter("use_lidar_sensing", false);
     lidar_detector_.configure(
@@ -79,6 +103,27 @@ public:
     target_y_ = declare_parameter("target_y", 0.0);
     target_z_ = declare_parameter("target_z", 2.0);
 
+    use_formation_ = declare_parameter("use_formation", false);
+    formation_gain_ = declare_parameter("formation_gain", 0.8);
+    formation_deadband_ = declare_parameter("formation_deadband", 0.15);
+    // Neighbor slot lists are aligned index-for-index with neighbor_names.
+    const auto neighbor_slot_x = declare_parameter("neighbor_slot_x", std::vector<double>{});
+    const auto neighbor_slot_y = declare_parameter("neighbor_slot_y", std::vector<double>{});
+    if (use_formation_) {
+      if (neighbor_slot_x.size() != neighbor_names_.size() ||
+        neighbor_slot_y.size() != neighbor_names_.size())
+      {
+        RCLCPP_WARN(get_logger(), "neighbor slot lists don't match neighbor_names, formation disabled");
+        use_formation_ = false;
+      } else {
+        own_slot_ = Eigen::Vector2d(
+          declare_parameter("slot_x", 0.0), declare_parameter("slot_y", 0.0));
+        for (size_t i = 0; i < neighbor_slot_x.size(); ++i) {
+          neighbor_slots_.emplace_back(neighbor_slot_x[i], neighbor_slot_y[i]);
+        }
+      }
+    }
+
     own_odom_sub_ = create_subscription<nav_msgs::msg::Odometry>(
       "odom", 10,
       std::bind(&ConsensusControllerNode::own_odom_callback, this, std::placeholders::_1));
@@ -86,6 +131,17 @@ public:
     target_override_sub_ = create_subscription<geometry_msgs::msg::Point>(
       "target_override", 10,
       [this](const geometry_msgs::msg::Point::SharedPtr msg) {
+        if (manual_target_active_) {
+          return;
+        }
+        target_x_ = msg->x;
+        target_y_ = msg->y;
+      });
+
+    manual_target_sub_ = create_subscription<geometry_msgs::msg::Point>(
+      "manual_target", 10,
+      [this](const geometry_msgs::msg::Point::SharedPtr msg) {
+        manual_target_active_ = true;
         target_x_ = msg->x;
         target_y_ = msg->y;
       });
@@ -166,12 +222,40 @@ private:
 
     constexpr double FORCE_CAP = 20.0;
 
+    std::vector<swarm_control::Obstacle> active_obstacles = obstacles_;
+    if (use_lidar_sensing_) {
+      active_obstacles.insert(
+        active_obstacles.end(), sensed_obstacles_.begin(), sensed_obstacles_.end());
+    }
+    const double obstacle_proximity =
+      obstacle_avoidance_.nearbyFactor(own_position, active_obstacles);
+
+    // Free zone around desired_spacing where separation is off entirely, so a
+    // drone at a good distance isn't constantly nudged by barrier/tether noise.
+    const double spacing_inner = std::max(min_safe_distance_ + 1e-3, desired_spacing_ - free_zone_margin_);
+    const double spacing_outer = desired_spacing_ + free_zone_margin_;
+
+    const Eigen::Vector2d goal = Eigen::Vector2d(target_x_, target_y_) + own_slot_;
+    // Capped so a far target can't drown out separation and avoidance.
+    Eigen::Vector2d navigation = navigation_gain_ * (goal - own_position);
+    if (navigation.norm() > max_horizontal_speed_) {
+      navigation = navigation.normalized() * max_horizontal_speed_;
+    }
+
     Eigen::Vector2d separation = Eigen::Vector2d::Zero();
     Eigen::Vector2d sum_velocity = Eigen::Vector2d::Zero();
     Eigen::Vector2d sum_accel = Eigen::Vector2d::Zero();
+    Eigen::Vector2d open_side = Eigen::Vector2d::Zero();
+    Eigen::Vector2d formation_error = Eigen::Vector2d::Zero();
+    int formation_count = 0;
     int active_neighbors = 0;
+    bool repelled = false;
+    bool conflict_found = false;
+    double most_urgent = collision_lookahead_time_;
+    Eigen::Vector2d conflict_tangent = Eigen::Vector2d::Zero();
 
-    for (auto & nb : neighbors_) {
+    for (size_t i = 0; i < neighbors_.size(); ++i) {
+      const NeighborEstimate & nb = neighbors_[i];
       if (!nb.have_measurement) {
         continue;
       }
@@ -179,34 +263,78 @@ private:
       const double dt_since = (current_time - nb.last_measurement_time).seconds();
       const Eigen::Vector2d predicted_position = nb.position + nb.velocity * dt_since;
 
+      if (use_formation_) {
+        formation_error +=
+          (predicted_position - neighbor_slots_[i]) - (own_position - own_slot_);
+        ++formation_count;
+      }
+
       const Eigen::Vector2d offset = own_position - predicted_position;
       const double dist = offset.norm();
       if (dist < 1e-6) {
         continue;
       }
       const Eigen::Vector2d direction = offset / dist;
+      const Eigen::Vector2d tangent(-direction.y(), direction.x());
+      const Eigen::Vector2d chosen_tangent =
+        tangent.dot(navigation) >= 0.0 ? tangent : -tangent;
 
       // Summed over every neighbor, not just nearest, to avoid a discontinuous switch.
       if (dist <= min_safe_distance_) {
-        separation += FORCE_CAP * direction;
-      } else if (dist < desired_spacing_) {
-        double magnitude = barrier_gain_ *
-          (1.0 / (dist - min_safe_distance_) - 1.0 / (desired_spacing_ - min_safe_distance_));
-        separation += std::clamp(magnitude, 0.0, FORCE_CAP) * direction;
-      } else {
-        double magnitude = std::clamp(tether_gain_ * (dist - desired_spacing_), 0.0, FORCE_CAP);
-        separation -= magnitude * direction;
+        separation += FORCE_CAP * direction + barrier_tangential_gain_ * chosen_tangent;
+        repelled = true;
+      } else if (dist <= interaction_range_) {
+        if (dist < spacing_inner) {
+          double magnitude = barrier_gain_ *
+            (1.0 / (dist - min_safe_distance_) - 1.0 / (spacing_inner - min_safe_distance_));
+          const double proximity = std::clamp(
+            1.0 - (dist - min_safe_distance_) / (spacing_inner - min_safe_distance_), 0.0, 1.0);
+          separation += std::clamp(magnitude, 0.0, FORCE_CAP) * direction +
+            barrier_tangential_gain_ * proximity * chosen_tangent;
+          repelled = true;
+        } else if (dist > spacing_outer && !use_formation_) {
+          // Near an obstacle, loosen cohesion so avoidance isn't fighting the tether.
+          const double effective_tether_gain = tether_gain_ * (1.0 - obstacle_proximity);
+          double magnitude =
+            std::clamp(effective_tether_gain * (dist - spacing_outer), 0.0, tether_force_cap_);
+          separation -= magnitude * direction;
+        }
+      }
+
+      // Predict closest approach from current velocities, sidestep early if it's a hit.
+      // Skipped inside the barrier band, the barrier already owns that case.
+      const Eigen::Vector2d rel_vel = own_velocity - nb.velocity;
+      const double rel_speed_sq = rel_vel.squaredNorm();
+      if (dist >= spacing_inner && rel_speed_sq > 1e-6) {
+        const double t_closest = -offset.dot(rel_vel) / rel_speed_sq;
+        if (t_closest > 0.0 && t_closest < most_urgent &&
+          (offset + rel_vel * t_closest).norm() < min_safe_distance_)
+        {
+          most_urgent = t_closest;
+          conflict_tangent = chosen_tangent;
+          conflict_found = true;
+        }
       }
 
       if (dist > interaction_range_) {
         continue;
       }
+      open_side += direction / dist;
       sum_velocity += nb.velocity;
       sum_accel += nb.accel;
       ++active_neighbors;
     }
     if (separation.norm() > FORCE_CAP) {
       separation = separation.normalized() * FORCE_CAP;
+    }
+
+    if (sidestep_decay_time_ > 0.0) {
+      sidestep_ *= std::exp(-dt / sidestep_decay_time_);
+    } else {
+      sidestep_.setZero();
+    }
+    if (conflict_found) {
+      sidestep_ = sidestep_gain_ * conflict_tangent;
     }
 
     Eigen::Vector2d alignment = Eigen::Vector2d::Zero();
@@ -216,19 +344,35 @@ private:
       accel_feedforward = accel_feedforward_gain_ * (sum_accel / active_neighbors);
     }
 
-    const Eigen::Vector2d navigation =
-      navigation_gain_ * (Eigen::Vector2d(target_x_, target_y_) - own_position);
-
-    const Eigen::Vector2d desired = separation + alignment + accel_feedforward + navigation;
-    std::vector<swarm_control::Obstacle> active_obstacles = obstacles_;
-    if (use_lidar_sensing_) {
-      active_obstacles.insert(
-        active_obstacles.end(), sensed_obstacles_.begin(), sensed_obstacles_.end());
+    Eigen::Vector2d formation = Eigen::Vector2d::Zero();
+    if (formation_count > 0) {
+      formation_error /= formation_count;
+      const double error = formation_error.norm();
+      if (error > formation_deadband_) {
+        // Loosened near obstacles so the shape can bend around them.
+        formation = formation_gain_ * (1.0 - obstacle_proximity) *
+          (error - formation_deadband_) * formation_error / error;
+        if (formation.norm() > max_horizontal_speed_) {
+          formation = formation.normalized() * max_horizontal_speed_;
+        }
+      }
     }
+
+    const bool sidestepping = sidestep_.squaredNorm() > idle_deadband_ * idle_deadband_;
+    const Eigen::Vector2d desired =
+      separation + alignment + accel_feedforward + navigation + sidestep_ + formation;
     const Eigen::Vector2d avoidance =
-      obstacle_avoidance_.compute(own_position, desired, active_obstacles);
+      obstacle_avoidance_.compute(
+      own_position, own_velocity, navigation, open_side, active_obstacles);
 
     Eigen::Vector2d cmd = desired + avoidance;
+    const double dist_to_target = (goal - own_position).norm();
+    const bool arrived_and_clear =
+      dist_to_target < arrival_radius_ && !repelled && !sidestepping &&
+      avoidance.squaredNorm() < 1e-12;
+    if (arrived_and_clear || cmd.norm() < idle_deadband_) {
+      cmd = Eigen::Vector2d::Zero();
+    }
     const double speed = cmd.norm();
     if (speed > max_horizontal_speed_) {
       cmd *= max_horizontal_speed_ / speed;
@@ -263,19 +407,31 @@ private:
 
   std::vector<std::string> neighbor_names_;
   double interaction_range_, desired_spacing_;
-  double min_safe_distance_, barrier_gain_, tether_gain_;
+  double min_safe_distance_, barrier_gain_, barrier_tangential_gain_;
+  double tether_gain_, tether_force_cap_, free_zone_margin_;
+  double collision_lookahead_time_, sidestep_decay_time_, sidestep_gain_;
+  Eigen::Vector2d sidestep_ = Eigen::Vector2d::Zero();
   double alignment_gain_, accel_feedforward_gain_, navigation_gain_;
   double accel_filter_k_;
   double max_horizontal_speed_;
   double max_cmd_accel_;
+  double idle_deadband_;
+  double arrival_radius_;
   Eigen::Vector2d last_cmd_ = Eigen::Vector2d::Zero();
 
   double target_x_, target_y_, target_z_;
+  bool manual_target_active_ = false;
+
+  bool use_formation_ = false;
+  double formation_gain_, formation_deadband_;
+  Eigen::Vector2d own_slot_ = Eigen::Vector2d::Zero();
+  std::vector<Eigen::Vector2d> neighbor_slots_;
 
   std::vector<NeighborEstimate> neighbors_;
   std::vector<rclcpp::Subscription<nav_msgs::msg::Odometry>::SharedPtr> neighbor_subs_;
   rclcpp::Subscription<nav_msgs::msg::Odometry>::SharedPtr own_odom_sub_;
   rclcpp::Subscription<geometry_msgs::msg::Point>::SharedPtr target_override_sub_;
+  rclcpp::Subscription<geometry_msgs::msg::Point>::SharedPtr manual_target_sub_;
   rclcpp::Subscription<sensor_msgs::msg::LaserScan>::SharedPtr scan_sub_;
   rclcpp::Publisher<geometry_msgs::msg::Twist>::SharedPtr cmd_vel_pub_;
 

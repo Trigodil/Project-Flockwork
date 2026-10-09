@@ -12,7 +12,9 @@ import math
 import os
 
 from launch import LaunchDescription
-from launch.actions import DeclareLaunchArgument, IncludeLaunchDescription, OpaqueFunction
+from launch.actions import (
+    DeclareLaunchArgument, ExecuteProcess, IncludeLaunchDescription, OpaqueFunction,
+)
 from launch.launch_description_sources import PythonLaunchDescriptionSource
 from launch.substitutions import LaunchConfiguration, PythonExpression
 
@@ -177,12 +179,24 @@ DRONE_SDF_TEMPLATE = """<sdf version="1.6">
 """
 
 CONSENSUS_GAIN_ARGS = [
-    'interaction_range', 'desired_spacing', 'min_safe_distance', 'barrier_gain', 'tether_gain',
+    'interaction_range', 'desired_spacing', 'min_safe_distance', 'barrier_gain',
+    'barrier_tangential_gain', 'tether_gain', 'tether_force_cap', 'free_zone_margin',
+    'collision_lookahead_time', 'sidestep_decay_time', 'sidestep_gain', 'arrival_radius',
     'alignment_gain', 'accel_feedforward_gain', 'navigation_gain',
-    'accel_filter_k', 'max_horizontal_speed', 'max_cmd_accel',
+    'accel_filter_k', 'max_horizontal_speed', 'max_cmd_accel', 'idle_deadband',
     'obstacle_detection_radius', 'obstacle_safety_margin',
-    'obstacle_radial_gain', 'obstacle_tangential_gain',
+    'obstacle_radial_gain', 'obstacle_lateral_gain',
+    'formation_gain', 'formation_deadband',
 ]
+
+
+def grid_slots(num_drones, spacing):
+    cols = max(1, math.ceil(math.sqrt(num_drones)))
+    rows = math.ceil(num_drones / cols)
+    return [
+        (((i % cols) - (cols - 1) / 2) * spacing, ((i // cols) - (rows - 1) / 2) * spacing)
+        for i in range(num_drones)
+    ]
 
 
 def launch_swarm(context, *args, **kwargs):
@@ -204,6 +218,9 @@ def launch_swarm(context, *args, **kwargs):
         'lidar_self_exclusion_radius':
             float(LaunchConfiguration('lidar_self_exclusion_radius').perform(context)),
     }
+
+    use_formation = LaunchConfiguration('use_formation').perform(context) == 'true'
+    slots = grid_slots(num_drones, consensus_gains['desired_spacing'])
 
     actions = []
     bridge_args = []
@@ -236,7 +253,8 @@ def launch_swarm(context, *args, **kwargs):
         bridge_args.append(f'{lidar_topic}@sensor_msgs/msg/LaserScan[gz.msgs.LaserScan')
         bridge_remaps.append((lidar_topic, f'/{ns}/scan'))
 
-        neighbor_names = [f'x3_{j}' for j in range(num_drones) if j != i]
+        neighbor_ids = [j for j in range(num_drones) if j != i]
+        neighbor_names = [f'x3_{j}' for j in neighbor_ids]
         actions.append(Node(
             package='swarm_control',
             executable='consensus_controller_node',
@@ -248,6 +266,10 @@ def launch_swarm(context, *args, **kwargs):
                 'obstacle_x': [o[0] for o in OBSTACLES],
                 'obstacle_y': [o[1] for o in OBSTACLES],
                 'obstacle_radius': [o[2] for o in OBSTACLES],
+                'use_formation': use_formation,
+                'slot_x': slots[i][0], 'slot_y': slots[i][1],
+                'neighbor_slot_x': [slots[j][0] for j in neighbor_ids],
+                'neighbor_slot_y': [slots[j][1] for j in neighbor_ids],
                 **consensus_gains,
                 **lidar_params,
             }],
@@ -261,6 +283,20 @@ def launch_swarm(context, *args, **kwargs):
         remappings=bridge_remaps,
         output='screen',
     ))
+
+    if LaunchConfiguration('use_path').perform(context) == 'true':
+        drone_list = ','.join(f'x3_{i}' for i in range(num_drones))
+        # '=' form: a waypoint list starting with a negative x would
+        # otherwise be parsed as an option by argparse.
+        cmd = [
+            'python3', os.path.join(os.path.dirname(__file__), 'path_follower.py'),
+            f'--drones={drone_list}',
+            '--waypoints=' + LaunchConfiguration('path').perform(context),
+            '--radius=' + LaunchConfiguration('waypoint_radius').perform(context),
+        ]
+        if LaunchConfiguration('path_loop').perform(context) == 'true':
+            cmd.append('--loop')
+        actions.append(ExecuteProcess(cmd=cmd, output='screen'))
 
     return actions
 
@@ -286,21 +322,39 @@ def generate_launch_description():
         DeclareLaunchArgument('start_y', default_value='0.0'),
         DeclareLaunchArgument('destination_x', default_value='8.0'),
         DeclareLaunchArgument('destination_y', default_value='0.0'),
+        DeclareLaunchArgument('use_path', default_value='false',
+                               description='Follow a waypoint path instead of one fixed target.'),
+        DeclareLaunchArgument('path', default_value='-8.0,0.0;8.0,0.0',
+                               description="Semicolon-separated x,y waypoints, e.g. '-8,0;0,2;8,0'."),
+        DeclareLaunchArgument('waypoint_radius', default_value='1.0'),
+        DeclareLaunchArgument('path_loop', default_value='false'),
         DeclareLaunchArgument('interaction_range', default_value='5.0'),
-        DeclareLaunchArgument('desired_spacing', default_value='1.3'),
+        DeclareLaunchArgument('desired_spacing', default_value='1.8'),
         DeclareLaunchArgument('min_safe_distance', default_value='0.9'),
-        DeclareLaunchArgument('barrier_gain', default_value='2.0'),
+        DeclareLaunchArgument('barrier_gain', default_value='3.0'),
+        DeclareLaunchArgument('barrier_tangential_gain', default_value='3.0'),
         DeclareLaunchArgument('tether_gain', default_value='0.5'),
+        DeclareLaunchArgument('tether_force_cap', default_value='5.0'),
+        DeclareLaunchArgument('free_zone_margin', default_value='0.4'),
+        DeclareLaunchArgument('collision_lookahead_time', default_value='1.5'),
+        DeclareLaunchArgument('sidestep_decay_time', default_value='1.0'),
+        DeclareLaunchArgument('sidestep_gain', default_value='3.0'),
         DeclareLaunchArgument('alignment_gain', default_value='0.5'),
         DeclareLaunchArgument('accel_feedforward_gain', default_value='0.25'),
         DeclareLaunchArgument('navigation_gain', default_value='0.6'),
         DeclareLaunchArgument('accel_filter_k', default_value='0.2'),
         DeclareLaunchArgument('max_horizontal_speed', default_value='2.0'),
         DeclareLaunchArgument('max_cmd_accel', default_value='3.0'),
+        DeclareLaunchArgument('idle_deadband', default_value='0.05'),
+        DeclareLaunchArgument('arrival_radius', default_value='0.5'),
         DeclareLaunchArgument('obstacle_detection_radius', default_value='2.0'),
         DeclareLaunchArgument('obstacle_safety_margin', default_value='0.4'),
         DeclareLaunchArgument('obstacle_radial_gain', default_value='1.5'),
-        DeclareLaunchArgument('obstacle_tangential_gain', default_value='1.0'),
+        DeclareLaunchArgument('obstacle_lateral_gain', default_value='2.0'),
+        DeclareLaunchArgument('use_formation', default_value='true',
+                               description='Hold grid slots around the destination.'),
+        DeclareLaunchArgument('formation_gain', default_value='0.8'),
+        DeclareLaunchArgument('formation_deadband', default_value='0.15'),
         DeclareLaunchArgument('use_lidar_sensing', default_value='false'),
         DeclareLaunchArgument('lidar_cluster_gap', default_value='0.3'),
         DeclareLaunchArgument('lidar_min_cluster_points', default_value='2'),
