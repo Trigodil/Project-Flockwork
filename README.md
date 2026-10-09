@@ -6,6 +6,16 @@ An open-source decentralized drone swarm control system, built from the ground u
 
 *six drones take off, split around the pillars, and re-form their grid at the destination.*
 
+## References
+
+The control laws here are written from scratch, but the ideas behind them come from:
+
+- **Flocking (consensus controller):** R. Olfati-Saber, "Flocking for Multi-Agent Dynamic Systems: Algorithms and Theory," *IEEE Transactions on Automatic Control*, 51(3):401-420, 2006. [Caltech technical report](https://authors.library.caltech.edu/28030)
+- **Formation slots (displacement-based formation control):** K.-K. Oh, M.-C. Park, H.-S. Ahn, "A survey of multi-agent formation control," *Automatica*, 53:424-440, 2015. [Record](https://scholar.gist.ac.kr/handle/local/14790)
+- **Obstacle and neighbor braking (control barrier functions):** A. D. Ames, S. Coogan, M. Egerstedt, G. Notomista, K. Sreenath, P. Tabuada, "Control Barrier Functions: Theory and Applications," *European Control Conference*, 2019. [arXiv:1903.11199](https://arxiv.org/abs/1903.11199)
+- **Mean-field density control (Lloyd's algorithm):** J. Cortés, S. Martínez, T. Karatas, F. Bullo, "Coverage Control for Mobile Sensing Networks," *IEEE Transactions on Robotics and Automation*, 20(2):243-255, 2004. [arXiv:math/0212212](https://arxiv.org/abs/math/0212212)
+- **Simulated vehicle (Gazebo's multicopter velocity controller):** T. Lee, M. Leok, N. H. McClamroch, "Control of Complex Maneuvers for a Quadrotor UAV using Geometric Methods on SE(3)," 2010. [arXiv:1003.2005](https://arxiv.org/abs/1003.2005)
+
 
 # AI
 
