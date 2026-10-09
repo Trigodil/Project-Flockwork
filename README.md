@@ -22,7 +22,7 @@ The control laws here are written from scratch, but the ideas behind them come f
 No AI was used in this project throughout, so please do not open an issue or PR if the code is not checked or reviewed, contributors are welcome to use LLMs to generate code, but please review and test any generated code before opening an issue or PR. Unreviewed AI output will be closed.
 ## Status
 
-Early scaffolding. Following an incremental build order, see [Roadmap](#roadmap).
+Stages 1 to 5 are working in simulation. A six-drone swarm flies point A to point B through static obstacles and wind, it holds a grid formation, and settles mostly without collisions. Next up is lidar-only obstacle sensing and real hardware implementation. See [Roadmap](#roadmap).
 
 ## Stack
 
@@ -51,22 +51,30 @@ Two sources feed `ObstacleAvoidance`, both just produce the same `Obstacle{posit
 
 ## Stress testing
 
-`tests/stress_test.launch.py` (not part of the `swarm_control` package on purpose) exercises stage 3's consensus logic against conditions it isn't designed to handle yet: wind disturbance, static obstacles with no avoidance logic, tight formation spacing, and a real point A to point B transit instead of hovering or orbiting in place.
+`tests/stress_test.launch.py` (not part of the `swarm_control` package on purpose) runs stages 3 and 4 against wind, three static pillars, tight formation spacing, and a real point A to point B transit instead of hovering or orbiting in place. This is the scenario in the GIF above.
 
 ```bash
 ros2 launch tests/launch/stress_test.launch.py
 ```
 
-This is meant to surface where the current logic breaks down. A known finding so far: a drone that collides with an obstacle (no avoidance exists yet) combined with sustained wind can drift far off the intended path with nothing pulling it back except the navigation term, a gap that stage 4 (collision avoidance) is meant to close.
+Useful flags that can be used: `num_drones:=9` for a harder squeeze, `use_formation:=false` to compare against plain flocking, `use_path:=true path:='-8,0;0,3;8,0'` to fly waypoints, `use_lidar_sensing:=true` to detect obstacles with simulated lidar on top of the known positions.
 
-Drone-to-drone spacing now has a safety floor: a barrier force (`min_safe_distance`, `barrier_gain`) grows sharply as any neighbor gets too close, an unbounded-but-capped tether (`tether_gain`) pulls a drone back once it strays past `desired_spacing` from its nearest neighbor even beyond `interaction_range`, and the final velocity command is rate-limited (`max_cmd_accel`) so it can't jump discontinuously between ticks. `min_safe_distance` defaults to 0.9m, above the X3 model's real ~0.71m rotor-to-rotor collision floor, going below that is a physical collision no control law can prevent. If you see runaway altitude or wild positions during testing, check for stale `ros2 launch` / `parameter_bridge` processes left over from a previous run first (`ps aux | grep gz`), two simulations publishing to the same topic names looks exactly like instability but isn't.
+Drone-to-drone spacing has a safety floor: `min_safe_distance` defaults to 0.9m, above the X3 model's real ~0.71m rotor-to-rotor collision floor. Going below that is a physical collision no control law can prevent. If you see runaway altitude or wild positions during testing, check for stale `ros2 launch` / `parameter_bridge` processes left over from a previous run first (`ps aux | grep gz`). Two simulations publishing to the same topic names looks exactly like instability but isn't.
+
+Known limitation: the navigation term is proportional only, so a steady wind leaves the final formation offset by a few tenths of a meter.
 
 ## Roadmap
 
 1. **Single quadrotor control**: rigid-body model in Gazebo, C++ PID node holding a position setpoint. Done, see `single_drone.launch.py`.
 2. **N independent drones**: same controller, replicated, no coordination yet(for now). Done, see `swarm.launch.py`.
 3. **Decentralized consensus**: drones exchange local state over ROS 2 topics with neighbors and converge on a shared formation/heading. The core "swarm" behavior. Done, see `consensus_controller_node.cpp`, three local forces (separation/cohesion, velocity alignment, acceleration feedforward from a filtered neighbor-state estimate) plus a navigation term toward a shared goal. Verified stable(Note this is in Gazebo) (velocities settle to approx 0, so no divergence or collisions) both standalone and combined with stage 5. Gains tuned, all overridable via launch args, see `desired_spacing`, `interaction_range`, and the `*_gain` arguments on `swarm.launch.py`.
-4. **Collision avoidance**: layered on top of consensus (potential fields / velocity obstacles).
+   - **Formation slots** (`use_formation`, on in the stress test): each drone holds a grid slot relative to its neighbors (displacement-based formation control), with a dead zone (`formation_deadband`) where it neither pushes nor pulls. This replaced the old tether, which pulled every drone toward every neighbor and caused oscillation.
+   - **Settle mode**: when fewer than 2 drones are actively moving, the repel and contract forces drop to 0.3x so small corrections don't chain-react through the swarm.
+   - **Body-frame commands**: Gazebo's velocity controller takes body-frame velocity, so commands are rotated by the drone's yaw and yaw is held at zero. Without this, a yaw bump from a collision rotates every command and the drone spirals away.
+4. **Collision avoidance**: layered on top of consensus, see `obstacle_avoidance.hpp`.
+   - **Sideways dodge**: forward velocity is kept, and a sideways velocity just large enough to clear the obstacle by the time the drone reaches it is added. The side is picked by geometry, or by whichever side has fewer neighbors when the obstacle is dead ahead.
+   - **Braking filter** (a simple control barrier function): the part of a command heading into a pillar or a neighbor is capped at the speed the drone can still stop from, and the removed speed is redirected into sliding around the obstacle instead of stalling.
+   - **Takeoff hold**: no horizontal motion until the drone reaches 80% of its hover height.
 5. **Mean-field density control**: a global layer, separate from stage 3's local consensus, that treats the swarm as a collective. Computes a voronoi partition of a target density function from current drone positions (Lloyd's algorithm / Cortes et al. coverage control) and publishes each drone's cell centroid as its target. Individual PID control is unchanged, this only changes what target it chases. Done as well, see `mean_field_controller_node.cpp`. A fully decentralized version (each drone computes its own cell from neighbors only, no central node) is sketched but disabled in `distributed_density_controller_node.cpp`.
 
 ## Building
