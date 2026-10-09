@@ -4,7 +4,7 @@ An open-source decentralized drone swarm control system, built from the ground u
 
 ![Six drones holding a 3x2 formation while threading three pillars in the stress test](docs/media/stress_test.gif)
 
-*Stress test, 2x speed: six drones take off, split around the pillars, and re-form their grid at the destination.*
+*six drones take off, split around the pillars, and re-form their grid at the destination.*
 
 
 # AI
