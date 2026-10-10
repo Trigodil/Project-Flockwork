@@ -63,9 +63,9 @@ ros2 launch tests/launch/stress_test.launch.py
 
 Useful flags that can be used: `num_drones:=9` for a harder squeeze, `use_formation:=false` to compare against plain flocking, `use_path:=true path:='-8,0;0,3;8,0'` to fly waypoints, `use_lidar_sensing:=true` to detect obstacles with simulated lidar on top of the known positions.
 
-Drone-to-drone spacing has a safety floor: `min_safe_distance` defaults to 0.9m, above the X3 model's real ~0.71m rotor-to-rotor collision floor. Going below that is a physical collision no control law can prevent. If you see runaway altitude or wild positions during testing, check for stale `ros2 launch` / `parameter_bridge` processes left over from a previous run first (`ps aux | grep gz`). Two simulations publishing to the same topic names looks exactly like instability but isn't.
+Drone-to-drone spacing has a safety floor: `min_safe_distance` defaults to 0.9m, above the X3 model's real ~0.71m rotor-to-rotor collision floor. Going below that is a physical collision no control law can prevent. If you see runaway altitude or wild positions during testing, check for stale `ros2 launch` / `parameter_bridge` processes left over from a previous run first (`ps aux | grep gz`). Two simulations publishing to the same topic names looks exactly like instability but is not.
 
-Known limitation: the navigation term is proportional only, so a steady wind leaves the final formation offset by a few tenths of a meter.
+Known limitation - the navigation term is proportional only, so a steady wind leaves the final formation offset by a few tenths of a meter.
 
 ## Roadmap
 
