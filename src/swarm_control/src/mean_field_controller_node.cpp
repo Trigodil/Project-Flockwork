@@ -9,13 +9,10 @@
 #include "nav_msgs/msg/odometry.hpp"
 #include "geometry_msgs/msg/point.hpp"
 
-// Centralized mean-field density control, Lloyd's algorithm / Cortes et al.
-// coverage control. This treats the swarm as a collective: builds a target
-// density function, partitions space into a Voronoi diagram from current
-// drone positions, and moves each drone toward its cell's density-weighted
-// centroid(Kinda like fluid dynamics). This node only decides WHERE each drone should go, the
-// individual PID in single_drone_controller_node still decides HOW to get
-// there, unchanged. Global info is secondary input to local control.
+// Centralized mean-field density control (Lloyd's algorithm, Cortes et al.).
+// Partitions space into Voronoi cells from drone positions and sends each drone
+// to its cell's density-weighted centroid (kinda like fluid dynamics).
+// This picks WHERE each drone goes, the per-drone PID handles HOW.
 class MeanFieldControllerNode : public rclcpp::Node
 {
 public:
@@ -51,8 +48,7 @@ public:
         "/" + drone_names_[i] + "/target_override", 10));
     }
 
-    // Slow, global layer. Does not need to run every control tick, the
-    // target density is not changing at flocking speed.
+    // Slow global layer, the target density changes far slower than flocking.
     timer_ = create_wall_timer(
       std::chrono::duration<double>(update_period_sec_),
       std::bind(&MeanFieldControllerNode::update, this));
@@ -73,9 +69,7 @@ private:
     return density;
   }
 
-  // Rotates each target blob's base position around the domain center, so
-  // the swarm chases a moving formation instead of a static one when
-  // orbit_speed is nonzero.
+  // Rotates each target blob around the domain center when orbit_speed is nonzero.
   void updateRotatedTargets()
   {
     const double angle = orbit_speed_ * (now() - start_time_).seconds();

@@ -8,7 +8,7 @@
 #include "swarm_control/pid_controller.hpp"
 
 // Stage 1: hold a drone at a fixed setpoint with three PID loops (x, y, z),
-// commanding velocity instead of raw rotor thrust for now :sideye:.
+// commanding velocity for now :sideye:.
 class SingleDroneControllerNode : public rclcpp::Node
 {
 public:
@@ -26,9 +26,7 @@ public:
       "odom", 10,
       std::bind(&SingleDroneControllerNode::odom_callback, this, std::placeholders::_1));
 
-    // Global layer (e.g. mean_field_controller_node) can override the x,y
-    // target at runtime. Individual PID control stays exactly as-is, this
-    // just changes what it chases.
+    // A global layer (e.g. mean_field_controller_node) can retarget x,y at runtime.
     target_override_sub_ = create_subscription<geometry_msgs::msg::Point>(
       "target_override", 10,
       [this](const geometry_msgs::msg::Point::SharedPtr msg) {

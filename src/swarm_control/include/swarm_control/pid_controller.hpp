@@ -5,7 +5,7 @@ namespace swarm_control
 
 // Single-axis PID controller.
 // Integral term is clamped (anti-windup). Derivative acts on the
-// measurement, not the error, to avoid a spike on setpoint changes.
+// measurement, so setpoint changes cause no spike.
 class PidController
 {
 public:

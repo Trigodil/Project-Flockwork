@@ -1,11 +1,7 @@
 """Stress test: wind, static obstacles, tight formation spacing, and a
-real point A to point B transit instead of hovering or orbiting in place.
+point A to point B transit.
 
-Deliberately isolates stage 3 (consensus_controller_node) with no mean
-field layer, every drone gets the same destination directly.
-
-Kept out of the swarm_control package on purpose, this is a test
-scenario, not core control logic.
+Runs stage 3 (consensus_controller_node) alone, every drone gets the same destination.
 """
 
 import math
@@ -25,12 +21,8 @@ HOVER_HEIGHT = 2.0
 # Must match tests/worlds/stress_test.sdf's obstacle_1/2/3 poses.
 OBSTACLES = [(-2.0, -1.5, 0.4), (0.0, 1.5, 0.4), (2.0, -1.0, 0.4)]
 
-# Same X3 UAV base as swarm_control's template, plus a rigidly-joined
-# "wind_sail" link with enable_wind set. The drone's real body link lives
-# inside the fetched Fuel model, so we can't flip enable_wind on it
-# directly, force on this sail transmits through the fixed joint to the
-# whole rigid body instead. Verified this actually pushes the drone
-# before writing it here (see chat).
+# X3 UAV plus a fixed "wind_sail" link with enable_wind, since the body link
+# lives inside the Fuel model. Wind on the sail moves the whole drone.
 DRONE_SDF_TEMPLATE = """<sdf version="1.6">
 <model name="{ns}">
   <pose>{x} {y} 0.1 0 0 0</pose>
@@ -185,17 +177,8 @@ CONSENSUS_GAIN_ARGS = [
     'accel_filter_k', 'max_horizontal_speed', 'max_cmd_accel', 'idle_deadband',
     'obstacle_detection_radius', 'obstacle_safety_margin',
     'obstacle_radial_gain', 'obstacle_lateral_gain',
-    'formation_gain', 'formation_deadband',
+    'formation_gain', 'formation_deadband', 'formation_transition_time',
 ]
-
-
-def grid_slots(num_drones, spacing):
-    cols = max(1, math.ceil(math.sqrt(num_drones)))
-    rows = math.ceil(num_drones / cols)
-    return [
-        (((i % cols) - (cols - 1) / 2) * spacing, ((i // cols) - (rows - 1) / 2) * spacing)
-        for i in range(num_drones)
-    ]
 
 
 def launch_swarm(context, *args, **kwargs):
@@ -222,7 +205,7 @@ def launch_swarm(context, *args, **kwargs):
     start_spread_arg = LaunchConfiguration('start_spread').perform(context)
     start_spread = (
         float(start_spread_arg) if start_spread_arg else consensus_gains['desired_spacing'])
-    slots = grid_slots(num_drones, consensus_gains['desired_spacing'])
+    formation = LaunchConfiguration('formation').perform(context)
 
     actions = []
     bridge_args = []
@@ -269,9 +252,10 @@ def launch_swarm(context, *args, **kwargs):
                 'obstacle_y': [o[1] for o in OBSTACLES],
                 'obstacle_radius': [o[2] for o in OBSTACLES],
                 'use_formation': use_formation,
-                'slot_x': slots[i][0], 'slot_y': slots[i][1],
-                'neighbor_slot_x': [slots[j][0] for j in neighbor_ids],
-                'neighbor_slot_y': [slots[j][1] for j in neighbor_ids],
+                'formation': formation,
+                'swarm_index': i,
+                'num_drones': num_drones,
+                'neighbor_indices': neighbor_ids,
                 **consensus_gains,
                 **lidar_params,
             }],
@@ -299,6 +283,14 @@ def launch_swarm(context, *args, **kwargs):
         if LaunchConfiguration('path_loop').perform(context) == 'true':
             cmd.append('--loop')
         actions.append(ExecuteProcess(cmd=cmd, output='screen'))
+
+    mission = LaunchConfiguration('mission').perform(context)
+    if mission:
+        actions.append(ExecuteProcess(
+            cmd=['python3', os.path.join(os.path.dirname(__file__), 'swarm_commander.py'),
+                 '--script=' + mission],
+            output='screen',
+        ))
 
     return actions
 
@@ -356,9 +348,14 @@ def generate_launch_description():
         DeclareLaunchArgument('obstacle_radial_gain', default_value='1.5'),
         DeclareLaunchArgument('obstacle_lateral_gain', default_value='2.0'),
         DeclareLaunchArgument('use_formation', default_value='true',
-                               description='Hold grid slots around the destination.'),
+                               description='Hold formation slots around the destination.'),
+        DeclareLaunchArgument('formation', default_value='grid',
+                               description='Starting shape: grid, line, column, v, circle.'),
         DeclareLaunchArgument('formation_gain', default_value='0.8'),
         DeclareLaunchArgument('formation_deadband', default_value='0.15'),
+        DeclareLaunchArgument('formation_transition_time', default_value='3.0'),
+        DeclareLaunchArgument('mission', default_value='',
+                               description="Timed swarm commands, e.g. '25 formation v; 40 goto 0 6'."),
         DeclareLaunchArgument('use_lidar_sensing', default_value='false'),
         DeclareLaunchArgument('lidar_cluster_gap', default_value='0.3'),
         DeclareLaunchArgument('lidar_min_cluster_points', default_value='2'),

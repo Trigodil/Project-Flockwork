@@ -96,7 +96,7 @@ public:
   }
 
   // Caps the speed into each obstacle so the drone can still stop before the margin,
-  // redirecting the removed speed along the surface so it slides around instead of stalling.
+  // redirecting the removed speed along the surface so it keeps sliding around.
   Eigen::Vector2d limitApproach(
     const Eigen::Vector2d & position, Eigen::Vector2d cmd,
     const std::vector<Obstacle> & obstacles, double max_decel) const

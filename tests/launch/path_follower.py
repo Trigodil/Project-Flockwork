@@ -1,10 +1,7 @@
-#!/usr/bin/env python3
-"""Test-only waypoint follower.
+"""Waypoint follower.
 
-Publishes the current waypoint of a shared path to each drone's
-manual_target topic, advancing per-drone once it gets within
---radius of its current waypoint. Not part of the swarm_control
-package on purpose, same reason as the rest of tests/.
+Publishes a shared path's current waypoint to each drone's manual_target,
+advancing per drone once it is within --radius of that waypoint.
 """
 import argparse
 

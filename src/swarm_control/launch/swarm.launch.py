@@ -1,9 +1,8 @@
 """Stage 2 launch file. Spawns N independent drones into an empty world,
 bridges each one's topics, and starts one controller node per drone.
 
-Each drone hovers straight up from its own spawn point (same x, y as
-spawn, z = 2m) so none of them have to cross another drone's path. No
-coordination between drones yet, that is stage 3.
+Each drone hovers straight up from its spawn point to z = 2m, so no paths cross.
+Coordination between drones comes in stage 3.
 """
 
 import math
@@ -127,7 +126,7 @@ DRONE_SDF_TEMPLATE = """<sdf version="1.6">
 """
 
 # Not active yet. Broadcasts real IMU linear_acceleration per drone
-# instead of estimating it from velocity. Needs a <model> wrapping a
+# for the controller to use directly. Needs a <model> wrapping a
 # merge="true" include (plain <include><plugin> can't add new links),
 # the gz-sim-imu-system world plugin (worlds/swarm.sdf, also commented
 # out), and this bridge line per drone:

@@ -1,14 +1,7 @@
-#!/usr/bin/env python3
 """Interactive target-setting tool.
 
 Type a drone name (or 'all') and an x,y target, the drone flies there.
-Publishes on manual_target, which the controller ranks above the
-automatic target_override layer, so this still works when
-swarm.launch.py is running mean_field_controller_node. Run alongside an
-already running swarm.launch.py or stress_test.launch.py, not part of
-either.
-Not part of the swarm_control package on purpose, same as the rest of
-tests/.
+manual_target outranks target_override, so it also works over the mean-field layer.
 """
 import sys
 

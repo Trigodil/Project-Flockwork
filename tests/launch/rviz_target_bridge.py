@@ -1,15 +1,7 @@
-#!/usr/bin/env python3
 """RViz click-to-target bridge.
 
-Subscribes to RViz's "Publish Point" tool output (/clicked_point) and
-forwards it as a manual_target to the selected drone, 'all' by default.
-The controller ranks manual_target above the automatic target_override
-layer, so this still works when swarm.launch.py is running
-mean_field_controller_node. Also republishes each drone's odom position as markers so
-they show up in RViz while clicking. Run alongside an already running
-swarm.launch.py or stress_test.launch.py, not part of either. Not
-part of the swarm_control package on purpose, same as the rest of
-tests/.
+Forwards /clicked_point as a manual_target to the selected drone ('all' by default)
+and republishes each drone's position as RViz markers.
 """
 import sys
 

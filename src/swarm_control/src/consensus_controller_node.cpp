@@ -11,7 +11,9 @@
 #include "geometry_msgs/msg/point.hpp"
 #include "geometry_msgs/msg/twist.hpp"
 #include "sensor_msgs/msg/laser_scan.hpp"
+#include "std_msgs/msg/string.hpp"
 
+#include "swarm_control/formation_shapes.hpp"
 #include "swarm_control/lidar_obstacle_detector.hpp"
 #include "swarm_control/obstacle_avoidance.hpp"
 #include "swarm_control/pid_controller.hpp"
@@ -29,10 +31,8 @@ struct NeighborEstimate
 };
 }  // namespace
 
-// Timestamps use our own now(), not the sender's stamp, so dead-reckoning
-// stays consistent across clock differences.
-// Acceleration is low-pass filtered, not raw-differenced, to avoid
-// amplifying broadcast noise.
+// Timestamps use our own now(), so dead-reckoning stays consistent across clocks.
+// Neighbor acceleration is low-pass filtered to keep broadcast noise down.
 class ConsensusControllerNode : public rclcpp::Node
 {
 public:
@@ -115,21 +115,20 @@ public:
     use_formation_ = declare_parameter("use_formation", false);
     formation_gain_ = declare_parameter("formation_gain", 0.8);
     formation_deadband_ = declare_parameter("formation_deadband", 0.15);
-    // Neighbor slot lists are aligned index-for-index with neighbor_names.
-    const auto neighbor_slot_x = declare_parameter("neighbor_slot_x", std::vector<double>{});
-    const auto neighbor_slot_y = declare_parameter("neighbor_slot_y", std::vector<double>{});
+    formation_transition_time_ = declare_parameter("formation_transition_time", 3.0);
+    swarm_index_ = declare_parameter("swarm_index", 0);
+    // Aligned index-for-index with neighbor_names.
+    neighbor_indices_ = declare_parameter("neighbor_indices", std::vector<int64_t>{});
+    num_drones_ = declare_parameter(
+      "num_drones", static_cast<int64_t>(neighbor_names_.size() + 1));
+    neighbor_slots_.assign(neighbor_names_.size(), Eigen::Vector2d::Zero());
+    transition_start_ = now();
     if (use_formation_) {
-      if (neighbor_slot_x.size() != neighbor_names_.size() ||
-        neighbor_slot_y.size() != neighbor_names_.size())
-      {
-        RCLCPP_WARN(get_logger(), "neighbor slot lists don't match neighbor_names, formation disabled");
+      if (neighbor_indices_.size() != neighbor_names_.size()) {
+        RCLCPP_WARN(get_logger(), "neighbor_indices doesn't match neighbor_names, formation disabled");
         use_formation_ = false;
-      } else {
-        own_slot_ = Eigen::Vector2d(
-          declare_parameter("slot_x", 0.0), declare_parameter("slot_y", 0.0));
-        for (size_t i = 0; i < neighbor_slot_x.size(); ++i) {
-          neighbor_slots_.emplace_back(neighbor_slot_x[i], neighbor_slot_y[i]);
-        }
+      } else if (!setFormation(declare_parameter("formation", std::string("grid")), false)) {
+        use_formation_ = false;
       }
     }
 
@@ -153,6 +152,24 @@ public:
         manual_target_active_ = true;
         target_x_ = msg->x;
         target_y_ = msg->y;
+      });
+
+    swarm_target_sub_ = create_subscription<geometry_msgs::msg::Point>(
+      "/swarm/target", 10,
+      [this](const geometry_msgs::msg::Point::SharedPtr msg) {
+        manual_target_active_ = true;
+        target_x_ = msg->x;
+        target_y_ = msg->y;
+      });
+
+    formation_sub_ = create_subscription<std_msgs::msg::String>(
+      "/swarm/formation", 10,
+      [this](const std_msgs::msg::String::SharedPtr msg) {
+        if (!use_formation_) {
+          RCLCPP_WARN(get_logger(), "formation '%s' ignored, use_formation is off", msg->data.c_str());
+          return;
+        }
+        setFormation(msg->data, true);
       });
 
     if (use_lidar_sensing_) {
@@ -180,6 +197,62 @@ public:
   }
 
 private:
+  bool setFormation(const std::string & shape, bool blend)
+  {
+    auto slots = swarm_control::formationSlots(shape, num_drones_, desired_spacing_);
+    if (slots.empty()) {
+      RCLCPP_WARN(get_logger(), "unknown formation '%s'", shape.c_str());
+      return false;
+    }
+    const auto in_range = [&](int64_t index) {return index >= 0 && index < num_drones_;};
+    if (!in_range(swarm_index_) ||
+      !std::all_of(neighbor_indices_.begin(), neighbor_indices_.end(), in_range))
+    {
+      RCLCPP_WARN(get_logger(), "swarm indices out of range for %ld drones", num_drones_);
+      return false;
+    }
+
+    // Every drone runs this on the same inputs, so they agree without talking.
+    if (!swarm_slots_.empty()) {
+      const auto assignment = swarm_control::assignSlots(swarm_slots_, slots);
+      std::vector<Eigen::Vector2d> assigned(slots.size());
+      for (size_t i = 0; i < slots.size(); ++i) {
+        assigned[i] = slots[assignment[i]];
+      }
+      slots = assigned;
+    }
+    swarm_slots_ = slots;
+
+    updateSlotBlend();
+    from_own_slot_ = blend ? own_slot_ : slots[swarm_index_];
+    from_neighbor_slots_.clear();
+    to_neighbor_slots_.clear();
+    for (size_t i = 0; i < neighbor_indices_.size(); ++i) {
+      from_neighbor_slots_.push_back(blend ? neighbor_slots_[i] : slots[neighbor_indices_[i]]);
+      to_neighbor_slots_.push_back(slots[neighbor_indices_[i]]);
+    }
+    to_own_slot_ = slots[swarm_index_];
+    transition_start_ = now();
+    updateSlotBlend();
+    RCLCPP_INFO(get_logger(), "formation set to '%s'", shape.c_str());
+    return true;
+  }
+
+  void updateSlotBlend()
+  {
+    if (from_neighbor_slots_.size() != neighbor_slots_.size()) {
+      return;
+    }
+    const double elapsed = (now() - transition_start_).seconds();
+    const double s = formation_transition_time_ > 0.0 ?
+      std::clamp(elapsed / formation_transition_time_, 0.0, 1.0) : 1.0;
+    own_slot_ = from_own_slot_ + s * (to_own_slot_ - from_own_slot_);
+    for (size_t i = 0; i < neighbor_slots_.size(); ++i) {
+      neighbor_slots_[i] =
+        from_neighbor_slots_[i] + s * (to_neighbor_slots_[i] - from_neighbor_slots_[i]);
+    }
+  }
+
   void neighbor_callback(size_t i, const nav_msgs::msg::Odometry::SharedPtr msg)
   {
     NeighborEstimate & nb = neighbors_[i];
@@ -207,7 +280,7 @@ private:
     sensed_obstacles_ = lidar_detector_.detect(*msg, own_position_, own_yaw_);
   }
 
-  // Real hardware: needs the lidar's actual tf2 mounting offset, not zero.
+  // Real hardware: needs the lidar's actual tf2 mounting offset.
   // Eigen::Vector2d ConsensusControllerNode::lidarOffset() const
   // {
   //   auto tf = tf_buffer_->lookupTransform("base_link", "lidar_link", tf2::TimePointZero);
@@ -244,6 +317,9 @@ private:
     const double spacing_inner = std::max(min_safe_distance_ + 1e-3, desired_spacing_ - free_zone_margin_);
     const double spacing_outer = desired_spacing_ + free_zone_margin_;
 
+    if (use_formation_) {
+      updateSlotBlend();
+    }
     const Eigen::Vector2d goal = Eigen::Vector2d(target_x_, target_y_) + own_slot_;
     // Capped so a far target can't drown out separation and avoidance.
     Eigen::Vector2d navigation = navigation_gain_ * (goal - own_position);
@@ -289,7 +365,7 @@ private:
       const Eigen::Vector2d chosen_tangent =
         tangent.dot(navigation) >= 0.0 ? tangent : -tangent;
 
-      // Summed over every neighbor, not just nearest, to avoid a discontinuous switch.
+      // Summed over every neighbor so the force stays continuous.
       if (dist <= min_safe_distance_) {
         emergency += FORCE_CAP * direction + barrier_tangential_gain_ * chosen_tangent;
         repelled = true;
@@ -475,15 +551,25 @@ private:
   bool manual_target_active_ = false;
 
   bool use_formation_ = false;
-  double formation_gain_, formation_deadband_;
+  double formation_gain_, formation_deadband_, formation_transition_time_;
+  int64_t swarm_index_, num_drones_;
+  std::vector<int64_t> neighbor_indices_;
   Eigen::Vector2d own_slot_ = Eigen::Vector2d::Zero();
+  Eigen::Vector2d from_own_slot_ = Eigen::Vector2d::Zero();
+  Eigen::Vector2d to_own_slot_ = Eigen::Vector2d::Zero();
   std::vector<Eigen::Vector2d> neighbor_slots_;
+  std::vector<Eigen::Vector2d> from_neighbor_slots_;
+  std::vector<Eigen::Vector2d> to_neighbor_slots_;
+  std::vector<Eigen::Vector2d> swarm_slots_;
+  rclcpp::Time transition_start_;
 
   std::vector<NeighborEstimate> neighbors_;
   std::vector<rclcpp::Subscription<nav_msgs::msg::Odometry>::SharedPtr> neighbor_subs_;
   rclcpp::Subscription<nav_msgs::msg::Odometry>::SharedPtr own_odom_sub_;
   rclcpp::Subscription<geometry_msgs::msg::Point>::SharedPtr target_override_sub_;
   rclcpp::Subscription<geometry_msgs::msg::Point>::SharedPtr manual_target_sub_;
+  rclcpp::Subscription<geometry_msgs::msg::Point>::SharedPtr swarm_target_sub_;
+  rclcpp::Subscription<std_msgs::msg::String>::SharedPtr formation_sub_;
   rclcpp::Subscription<sensor_msgs::msg::LaserScan>::SharedPtr scan_sub_;
   rclcpp::Publisher<geometry_msgs::msg::Twist>::SharedPtr cmd_vel_pub_;
 

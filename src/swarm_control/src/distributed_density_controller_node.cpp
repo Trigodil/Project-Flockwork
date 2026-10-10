@@ -1,12 +1,7 @@
-// Distributed version of mean_field_controller_node.cpp. Not built, and not
-// wired into CMakeLists.txt.
-//
-// Each drone computes its own Voronoi cell and centroid from neighbor
-// broadcasts only, no central node, Consequently it is exact if "neighbors" covers everyone
-// who could border your cell, approximate otherwise (Cortes et al 2004).
-//
-// To enable: remove #if 0/#endif, add to CMakeLists.txt, validate the
-// local centroid matches the centralized version's for the same state.
+// Distributed mean_field_controller_node.cpp, disabled (#if 0, absent from CMakeLists.txt).
+// Each drone computes its own Voronoi cell from neighbor broadcasts, exact when
+// neighbors cover everyone who could border the cell (Cortes et al 2004).
+// To enable: drop #if 0, add to CMakeLists.txt, check centroids match the centralized node.
 
 #if 0
 
