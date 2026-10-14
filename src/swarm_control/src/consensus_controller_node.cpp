@@ -116,6 +116,8 @@ public:
     formation_gain_ = declare_parameter("formation_gain", 0.8);
     formation_deadband_ = declare_parameter("formation_deadband", 0.15);
     formation_transition_time_ = declare_parameter("formation_transition_time", 3.0);
+    // Peak slot speed, kept low so every drone tracks its slot in sync.
+    formation_transition_speed_ = declare_parameter("formation_transition_speed", 0.6);
     swarm_index_ = declare_parameter("swarm_index", 0);
     // Aligned index-for-index with neighbor_names.
     neighbor_indices_ = declare_parameter("neighbor_indices", std::vector<int64_t>{});
@@ -221,35 +223,57 @@ private:
       }
       slots = assigned;
     }
+    from_swarm_slots_ = blend && !swarm_slots_.empty() ? blendedSlots(transitionProgress()) : slots;
     swarm_slots_ = slots;
 
-    updateSlotBlend();
-    from_own_slot_ = blend ? own_slot_ : slots[swarm_index_];
-    from_neighbor_slots_.clear();
-    to_neighbor_slots_.clear();
-    for (size_t i = 0; i < neighbor_indices_.size(); ++i) {
-      from_neighbor_slots_.push_back(blend ? neighbor_slots_[i] : slots[neighbor_indices_[i]]);
-      to_neighbor_slots_.push_back(slots[neighbor_indices_[i]]);
+    // Smoothstep peaks at 1.5x the average speed.
+    double longest_path = 0.0;
+    std::vector<double> path(slots.size(), 0.0);
+    auto prev = blendedSlots(0.0);
+    for (int k = 1; k <= 20; ++k) {
+      const auto next = blendedSlots(k / 20.0);
+      for (size_t i = 0; i < next.size(); ++i) {
+        path[i] += (next[i] - prev[i]).norm();
+        longest_path = std::max(longest_path, path[i]);
+      }
+      prev = next;
     }
-    to_own_slot_ = slots[swarm_index_];
+    transition_duration_ = formation_transition_speed_ > 0.0 ?
+      std::max(formation_transition_time_, 1.5 * longest_path / formation_transition_speed_) :
+      formation_transition_time_;
     transition_start_ = now();
     updateSlotBlend();
     RCLCPP_INFO(get_logger(), "formation set to '%s'", shape.c_str());
     return true;
   }
 
+  double transitionProgress() const
+  {
+    const double elapsed = (now() - transition_start_).seconds();
+    const double u = transition_duration_ > 0.0 ?
+      std::clamp(elapsed / transition_duration_, 0.0, 1.0) : 1.0;
+    return u * u * (3.0 - 2.0 * u);
+  }
+
+  // Spread so mid-switch slots never come closer than desired_spacing.
+  std::vector<Eigen::Vector2d> blendedSlots(double s) const
+  {
+    std::vector<Eigen::Vector2d> slots(swarm_slots_.size());
+    for (size_t i = 0; i < slots.size(); ++i) {
+      slots[i] = from_swarm_slots_[i] + s * (swarm_slots_[i] - from_swarm_slots_[i]);
+    }
+    return swarm_control::spreadSlots(slots, desired_spacing_);
+  }
+
   void updateSlotBlend()
   {
-    if (from_neighbor_slots_.size() != neighbor_slots_.size()) {
+    if (swarm_slots_.empty()) {
       return;
     }
-    const double elapsed = (now() - transition_start_).seconds();
-    const double s = formation_transition_time_ > 0.0 ?
-      std::clamp(elapsed / formation_transition_time_, 0.0, 1.0) : 1.0;
-    own_slot_ = from_own_slot_ + s * (to_own_slot_ - from_own_slot_);
+    const auto slots = blendedSlots(transitionProgress());
+    own_slot_ = slots[swarm_index_];
     for (size_t i = 0; i < neighbor_slots_.size(); ++i) {
-      neighbor_slots_[i] =
-        from_neighbor_slots_[i] + s * (to_neighbor_slots_[i] - from_neighbor_slots_[i]);
+      neighbor_slots_[i] = slots[neighbor_indices_[i]];
     }
   }
 
@@ -552,14 +576,13 @@ private:
 
   bool use_formation_ = false;
   double formation_gain_, formation_deadband_, formation_transition_time_;
+  double formation_transition_speed_;
+  double transition_duration_ = 0.0;
   int64_t swarm_index_, num_drones_;
   std::vector<int64_t> neighbor_indices_;
   Eigen::Vector2d own_slot_ = Eigen::Vector2d::Zero();
-  Eigen::Vector2d from_own_slot_ = Eigen::Vector2d::Zero();
-  Eigen::Vector2d to_own_slot_ = Eigen::Vector2d::Zero();
   std::vector<Eigen::Vector2d> neighbor_slots_;
-  std::vector<Eigen::Vector2d> from_neighbor_slots_;
-  std::vector<Eigen::Vector2d> to_neighbor_slots_;
+  std::vector<Eigen::Vector2d> from_swarm_slots_;
   std::vector<Eigen::Vector2d> swarm_slots_;
   rclcpp::Time transition_start_;
 

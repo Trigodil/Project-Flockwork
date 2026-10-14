@@ -178,6 +178,7 @@ CONSENSUS_GAIN_ARGS = [
     'obstacle_detection_radius', 'obstacle_safety_margin',
     'obstacle_radial_gain', 'obstacle_lateral_gain',
     'formation_gain', 'formation_deadband', 'formation_transition_time',
+    'formation_transition_speed',
 ]
 
 
@@ -354,6 +355,7 @@ def generate_launch_description():
         DeclareLaunchArgument('formation_gain', default_value='0.8'),
         DeclareLaunchArgument('formation_deadband', default_value='0.15'),
         DeclareLaunchArgument('formation_transition_time', default_value='3.0'),
+        DeclareLaunchArgument('formation_transition_speed', default_value='0.6'),
         DeclareLaunchArgument('mission', default_value='',
                                description="Timed swarm commands, e.g. '25 formation v; 40 goto 0 6'."),
         DeclareLaunchArgument('use_lidar_sensing', default_value='false'),

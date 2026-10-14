@@ -56,6 +56,25 @@ inline std::vector<Eigen::Vector2d> formationSlots(
   return slots;
 }
 
+// Scales about zero until no pair is closer than spacing, capped at 2x.
+inline std::vector<Eigen::Vector2d> spreadSlots(
+  std::vector<Eigen::Vector2d> slots, double spacing)
+{
+  double closest = std::numeric_limits<double>::infinity();
+  for (size_t i = 0; i < slots.size(); ++i) {
+    for (size_t j = i + 1; j < slots.size(); ++j) {
+      closest = std::min(closest, (slots[i] - slots[j]).norm());
+    }
+  }
+  if (closest < spacing && closest > 1e-6) {
+    const double scale = std::min(spacing / closest, 2.0);
+    for (auto & s : slots) {
+      s *= scale;
+    }
+  }
+  return slots;
+}
+
 // result[i] is drone i's slot in next, min total squared distance (CAPT).
 inline std::vector<int> assignSlots(
   const std::vector<Eigen::Vector2d> & current, const std::vector<Eigen::Vector2d> & next)
