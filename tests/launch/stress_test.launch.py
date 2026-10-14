@@ -350,7 +350,7 @@ def generate_launch_description():
         DeclareLaunchArgument('use_formation', default_value='true',
                                description='Hold formation slots around the destination.'),
         DeclareLaunchArgument('formation', default_value='grid',
-                               description='Starting shape: grid, line, column, v, circle.'),
+                               description='Starting shape: grid, line, column, v.'),
         DeclareLaunchArgument('formation_gain', default_value='0.8'),
         DeclareLaunchArgument('formation_deadband', default_value='0.15'),
         DeclareLaunchArgument('formation_transition_time', default_value='3.0'),

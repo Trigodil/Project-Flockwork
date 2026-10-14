@@ -1,7 +1,7 @@
 """Swarm-wide commands mid-flight: move the target or switch formation.
 
 Interactive by default, or timed steps with --script, in seconds since start:
---script='25 formation v; 40 goto 0 6; 60 formation circle'
+--script='25 formation v; 40 goto 0 6; 60 formation line'
 """
 import argparse
 import time
@@ -11,7 +11,7 @@ from rclpy.node import Node
 from geometry_msgs.msg import Point
 from std_msgs.msg import String
 
-SHAPES = ('grid', 'line', 'column', 'v', 'circle')
+SHAPES = ('grid', 'line', 'column', 'v')
 
 
 class SwarmCommander(Node):
@@ -67,7 +67,7 @@ def main():
                     print(node.run(line.split()))
                     rclpy.spin_once(node, timeout_sec=0.1)
         rclpy.spin_once(node, timeout_sec=0.5)
-    except KeyboardInterrupt:
+    except (KeyboardInterrupt, EOFError):
         pass
     finally:
         rclpy.shutdown()

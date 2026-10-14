@@ -41,12 +41,6 @@ inline std::vector<Eigen::Vector2d> formationSlots(
       const double side = (i % 2 == 1) ? 1.0 : -1.0;
       slots.emplace_back(-k * arm, side * k * arm);
     }
-  } else if (shape == "circle") {
-    const double radius = num_drones > 1 ? spacing / (2.0 * std::sin(M_PI / num_drones)) : 0.0;
-    for (int i = 0; i < num_drones; ++i) {
-      const double angle = 2.0 * M_PI * i / num_drones;
-      slots.emplace_back(radius * std::cos(angle), radius * std::sin(angle));
-    }
   } else {
     return slots;
   }
